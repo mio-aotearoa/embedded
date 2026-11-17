@@ -237,7 +237,9 @@ Two properties are deliberate:
 
 ### Deliberately out of scope (today)
 
-* Images, CSS, tables, math: the Reader is a text view.
+* Images and math: the renderer decodes neither. Articles up to 64 KB get CSS
+  and box layout; larger ones fall back to the Reader's text pass, which drops
+  CSS, tables and images.
 * Full-text search: only the ZIM title index is searched (prefix match).
 * Following ZIM-internal links from an article; the picker is the navigation.
 * Multiple archives open at once, and archives above the PSRAM/parse limits.
@@ -245,12 +247,11 @@ Two properties are deliberate:
 
 ### Web browser options
 
-The T-Deck ships a text browser (wadamesh's Reader) but no layout engine. The
-engines that could change that — TactileBrowser, eBrowser, Agave — and what each
-would cost in flash, build integration and LVGL version are compared in
-[`web-browser-options.md`](web-browser-options.md). The short version: none fits
-the ~199 KB left in the app slot, so a real engine is a partition-table/variant
-decision, not an app-page addition.
+The T-Deck's Web page is wadamesh's Reader with our renderer merged in: the
+pinned TactileBrowser core (Lexbor) does the layout and the Reader's text pass is
+the fallback. The engines that could have replaced it — eBrowser, Agave — and
+what each would cost in flash, build integration and LVGL version are compared
+in [`web-browser-options.md`](web-browser-options.md).
 
 ## Firmware 2 — reTerminal E1002: photoframe + AirDrop
 
