@@ -14,11 +14,12 @@ diff --git a/main/main.c b/main/main.c
 index de79471..9765beb 100644
 --- a/main/main.c
 +++ b/main/main.c
-@@ -5,6 +5,7 @@
+@@ -5,6 +5,8 @@
  #include <time.h>
  #include <unistd.h>
  
 +#include "airdrop_bridge.h"
++#include "display_flow.h"
  #include "album_manager.h"
  #include "board_hal.h"
  #include "color_palette.h"
