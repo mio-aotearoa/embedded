@@ -118,9 +118,12 @@ bool Esp32AiApp::open(void)
     snprintf(barTitle_, sizeof barTitle_, "%s", TR("ESP-AI"));
     appPageBegin(barTitle_, &Esp32AiApp::dismiss);
 
+    // The tall "< ESP-AI" bar overlaps the top of the root; start below it.
+    const lv_coord_t bar = appPageBarCover();
+
     list_ = lv_list_create(root_);
-    lv_obj_set_pos(list_, 0, 4);
-    lv_obj_set_size(list_, w, h - 48);
+    lv_obj_set_pos(list_, 0, bar + 4);
+    lv_obj_set_size(list_, w, h - bar - 48);
     lv_obj_set_style_bg_opa(list_, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(list_, 0, LV_PART_MAIN);
 

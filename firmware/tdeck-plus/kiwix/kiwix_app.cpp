@@ -309,11 +309,14 @@ bool KiwixApp::open(void)
     snprintf(barTitle_, sizeof barTitle_, "%s", TR("Kiwix"));
     appPageBegin(barTitle_, &KiwixApp::dismiss);
 
+    // The tall "< Kiwix" bar overlaps the top of the root; start below it.
+    const lv_coord_t bar = appPageBarCover();
+
     search_ = lv_textarea_create(root_);
     lv_textarea_set_one_line(search_, true);
     lv_textarea_set_placeholder_text(search_, TR("Search titles"));
     lv_obj_set_size(search_, w - 8, 34);
-    lv_obj_set_pos(search_, 4, 2);
+    lv_obj_set_pos(search_, 4, bar + 2);
     lv_obj_add_event_cb(search_, searchCb, LV_EVENT_READY, nullptr);
     lv_obj_add_flag(search_, LV_OBJ_FLAG_HIDDEN);
 
@@ -323,14 +326,14 @@ bool KiwixApp::open(void)
     lv_textarea_set_one_line(url_, true);
     lv_textarea_set_placeholder_text(url_, TR("https://\xE2\x80\xA6.zim"));
     lv_obj_set_size(url_, w - 8, 34);
-    lv_obj_set_pos(url_, 4, 40);
+    lv_obj_set_pos(url_, 4, bar + 40);
     lv_obj_add_event_cb(url_, urlReadyCb, LV_EVENT_READY, nullptr);
     lv_obj_add_event_cb(url_, urlCancelCb, LV_EVENT_CANCEL, nullptr);
     lv_obj_add_flag(url_, LV_OBJ_FLAG_HIDDEN);
 
     list_ = lv_list_create(root_);
-    lv_obj_set_pos(list_, 0, 40);
-    lv_obj_set_size(list_, w, h - 64);
+    lv_obj_set_pos(list_, 0, bar + 40);
+    lv_obj_set_size(list_, w, h - bar - 64);
     lv_obj_set_style_bg_opa(list_, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(list_, 0, LV_PART_MAIN);
 

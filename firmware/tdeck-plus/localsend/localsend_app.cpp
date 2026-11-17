@@ -67,9 +67,12 @@ bool LocalSendApp::open(void)
     snprintf(barTitle_, sizeof barTitle_, "%s", TR("LocalSend"));
     appPageBegin(barTitle_, &LocalSendApp::dismiss);
 
+    // The tall "< LocalSend" bar overlaps the top of the root; start below it.
+    const lv_coord_t bar = appPageBarCover();
+
     list_ = lv_list_create(root_);
-    lv_obj_set_pos(list_, 0, 2);
-    lv_obj_set_size(list_, w, h - 44);
+    lv_obj_set_pos(list_, 0, bar + 2);
+    lv_obj_set_size(list_, w, h - bar - 44);
     lv_obj_set_style_bg_opa(list_, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(list_, 0, LV_PART_MAIN);
 

@@ -110,8 +110,28 @@ index 75e3d7e..e17a42e 100644
  
  lib_deps =
    https://github.com/ALLFATHER-BV/meshcomod.git#core-v1.18.0
+diff --git a/src/ui-touch/AppPage.h b/src/ui-touch/AppPage.h
+index 484c510..92386b5 100644
+--- a/src/ui-touch/AppPage.h
++++ b/src/ui-touch/AppPage.h
+@@ -36,6 +36,15 @@ lv_coord_t appPageContentTop();
+ /** Usable content height below the status bar. */
+ lv_coord_t appPageContentH();
+ 
++/**
++ * Height of the tall bar that overlaps the top of a page root — the amount page
++ * content must be pushed down. appPageCreateRoot() starts one row below the
++ * default bar and appPageBegin() then doubles it, so its second row covers the
++ * top of the page (RepeaterAdminApp compensated by hand before this existed).
++ * 0 for pages that use appPageBeginSlim().
++ */
++lv_coord_t appPageBarCover();
++
+ /**
+  * Create a page root: full width, from just under the status bar to the bottom of the
+  * screen, on lv_layer_top, opaque `bg_color`, non-scrollable and CLICKABLE so no press
 diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
-index 44cc3fc..eae06bc 100644
+index 44cc3fc..1b00158 100644
 --- a/src/ui-touch/UITask.cpp
 +++ b/src/ui-touch/UITask.cpp
 @@ -154,6 +154,24 @@ static void* wadaMp3Scratch() { return s_wada_mp3_scratch; }
@@ -139,7 +159,21 @@ index 44cc3fc..eae06bc 100644
  #include "LuaHost.h"          // Lua app host (LUA_APPS.md; Phase 0 spike gate)
  #include "LuaAppHost.h"       // sandboxed Lua apps (LUA_APPS.md Phase 1; self-gated on CAP_LUA_APPS)
  
-@@ -61975,6 +61993,24 @@ enum AppDrawerAction {
+@@ -3020,6 +3038,13 @@ lv_coord_t appPageContentH() {
+   return (lv_coord_t)(lv_disp_get_ver_res(nullptr) - appPageContentTop());
+ }
+ 
++lv_coord_t appPageBarCover() {
++  // statusBarCurH() is the bar the page really has: two rows after
++  // appPageBegin(), one after appPageBeginSlim().
++  const lv_coord_t cover = statusBarCurH() - appPageContentTop();
++  return cover > 0 ? cover : 0;
++}
++
+ lv_obj_t* appPageCreateRoot(uint32_t bg_color) {
+   lv_obj_t* root = lv_obj_create(lv_layer_top());
+   lv_obj_remove_style_all(root);
+@@ -61975,6 +62000,24 @@ enum AppDrawerAction {
    APPACT_TERMINAL, APPACT_FILES, APPACT_FILE_TRANSFER, APPACT_SPECTRUM, APPACT_SNAKE, APPACT_VNC, APPACT_REMOTE, APPACT_READER,
    APPACT_DISCOVER, APPACT_STORE,
    APPACT_USB_FILES,
@@ -164,7 +198,7 @@ index 44cc3fc..eae06bc 100644
    APPACT_LUA_BASE = 100,   // APPACT_LUA_BASE + i = installed Lua app s_lua_inst[i]
  };
  // The drawer's built-in tiles, which are also what an App widget on Home can open.
-@@ -62017,6 +62053,24 @@ static const AppTileDef k_app_tiles[] = {
+@@ -62017,6 +62060,24 @@ static const AppTileDef k_app_tiles[] = {
    { UI_ICON_GAMEPAD_2,          "Snake",     APPACT_SNAKE,     HUE_MSG },     // native snake (Lua boards install it from the Store)
  #else
    { UI_ICON_STORE,              "Store",     APPACT_STORE,     HUE_MSG },     // Lua app store
@@ -189,7 +223,7 @@ index 44cc3fc..eae06bc 100644
  #endif
    { UI_ICON_HOUSE,              "Home",      APPACT_CMDCENTER, HUE_SYS },     // back to the Home widgets
    { UI_ICON_POWER,              "Power",     APPACT_POWER,     kAppHueDanger },
-@@ -62401,6 +62455,24 @@ static void appLaunch(int act, lv_event_t* e) {
+@@ -62401,6 +62462,24 @@ static void appLaunch(int act, lv_event_t* e) {
  #else
      case APPACT_SNAKE:     SnakeGame::launch();  return;
  #endif
@@ -214,7 +248,7 @@ index 44cc3fc..eae06bc 100644
  #if defined(HAS_TOUCH_UI)
      case APPACT_TERMINAL:  homeTerminalCb(e);    return;
  #endif
-@@ -89760,3 +89832,17 @@ static void docAuditFocus() {
+@@ -89760,3 +89839,17 @@ static void docAuditFocus() {
  }
  #endif
  #endif  // DOC_CAPTURE

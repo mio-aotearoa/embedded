@@ -31,4 +31,6 @@ class PeriodicApp
     lv_obj_t *grid_ = nullptr;
     lv_obj_t *detail_ = nullptr;
     int selected_ = 1;
+    // Row height actually used, fitted to the space below the status bar.
+    lv_coord_t cellH_ = 19;
 };

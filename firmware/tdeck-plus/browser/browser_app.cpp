@@ -214,9 +214,13 @@ bool BrowserApp::open(void)
     if (!tactilebrowser_core_init()) return false;
     tactilebrowser_set_renderer(&s_iface);
 
+    // The tall "< Browser" bar is two rows high while the root starts one row
+    // down, so its lower row covers the top of the page: lay out below it.
+    const lv_coord_t top = appPageBarCover() + 2;
+
     ta_ = lv_textarea_create(root_);
     lv_obj_set_size(ta_, w - 66, 30);
-    lv_obj_set_pos(ta_, 4, 2);
+    lv_obj_set_pos(ta_, 4, top);
     lv_textarea_set_one_line(ta_, true);
     lv_textarea_set_max_length(ta_, 255);
     lv_textarea_set_placeholder_text(ta_, "http://...");
@@ -224,15 +228,15 @@ bool BrowserApp::open(void)
 
     lv_obj_t *go = lv_btn_create(root_);
     lv_obj_set_size(go, 56, 30);
-    lv_obj_set_pos(go, w - 58, 2);
+    lv_obj_set_pos(go, w - 58, top);
     lv_obj_add_event_cb(go, goCb, LV_EVENT_CLICKED, nullptr);
     lv_obj_t *goLabel = lv_label_create(go);
     lv_label_set_text(goLabel, TR("Go"));
     lv_obj_center(goLabel);
 
     view_ = lv_obj_create(root_);
-    lv_obj_set_pos(view_, 0, 36);
-    lv_obj_set_size(view_, w, h - 62);
+    lv_obj_set_pos(view_, 0, top + 34);
+    lv_obj_set_size(view_, w, h - top - 34 - 26);
     lv_obj_set_style_bg_opa(view_, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_bg_color(view_, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
     lv_obj_set_style_text_color(view_, lv_color_hex(0x101418), LV_PART_MAIN);

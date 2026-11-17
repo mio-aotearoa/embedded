@@ -106,9 +106,12 @@ bool DownloadApp::open(void)
     snprintf(barTitle_, sizeof barTitle_, "%s", TR("Download"));
     appPageBegin(barTitle_, &DownloadApp::dismiss);
 
+    // The tall "< Download" bar overlaps the top of the root (see AppPage.h).
+    const lv_coord_t bar = appPageBarCover();
+
     ta_ = lv_textarea_create(root_);
     lv_obj_set_size(ta_, w - 8, 30);
-    lv_obj_set_pos(ta_, 4, 2);
+    lv_obj_set_pos(ta_, 4, bar + 2);
     lv_textarea_set_one_line(ta_, true);
     lv_textarea_set_max_length(ta_, 255);
     lv_textarea_set_placeholder_text(ta_, "https://...");
@@ -116,7 +119,7 @@ bool DownloadApp::open(void)
 
     getBtn_ = lv_btn_create(root_);
     lv_obj_set_size(getBtn_, 150, 28);
-    lv_obj_set_pos(getBtn_, 4, 36);
+    lv_obj_set_pos(getBtn_, 4, bar + 36);
     lv_obj_add_event_cb(getBtn_, downloadCb, LV_EVENT_CLICKED, nullptr);
     lv_obj_t *getLabel = lv_label_create(getBtn_);
     lv_label_set_text(getLabel, TR("Download to card"));
@@ -124,7 +127,7 @@ bool DownloadApp::open(void)
 
     cancelBtn_ = lv_btn_create(root_);
     lv_obj_set_size(cancelBtn_, 150, 28);
-    lv_obj_set_pos(cancelBtn_, 166, 36);
+    lv_obj_set_pos(cancelBtn_, 166, bar + 36);
     lv_obj_add_event_cb(cancelBtn_, cancelCb, LV_EVENT_CLICKED, nullptr);
     lv_obj_t *cancelLabel = lv_label_create(cancelBtn_);
     lv_label_set_text(cancelLabel, TR("Cancel"));
@@ -133,7 +136,7 @@ bool DownloadApp::open(void)
 
     list_ = lv_list_create(root_);
     lv_obj_set_size(list_, w, 78);
-    lv_obj_set_pos(list_, 0, 68);
+    lv_obj_set_pos(list_, 0, bar + 68);
     lv_obj_set_style_bg_opa(list_, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(list_, 0, LV_PART_MAIN);
     for (int i = 0; i < kPresetCount; i++)

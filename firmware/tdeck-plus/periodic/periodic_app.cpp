@@ -110,11 +110,18 @@ bool PeriodicApp::open(void)
     snprintf(barTitle_, sizeof barTitle_, "%s", TR("Periodic Table"));
     appPageBegin(barTitle_, &PeriodicApp::dismiss);
 
-    const lv_coord_t gridH = kRows * kCellH;
+    // The tall "< Periodic Table" bar overlaps the top of the root, and ten
+    // full-height rows no longer fit below it: squeeze the rows into the room
+    // that is left and keep the detail line on screen.
+    const lv_coord_t bar = appPageBarCover();
+    cellH_ = (lv_coord_t)((h - bar - 34) / kRows);
+    if (cellH_ > kCellH) cellH_ = kCellH;
+    if (cellH_ < 8) cellH_ = 8;
+    const lv_coord_t gridH = (lv_coord_t)(kRows * cellH_);
     grid_ = lv_obj_create(root_);
     lv_obj_remove_style_all(grid_);
     lv_obj_set_size(grid_, w, gridH);
-    lv_obj_set_pos(grid_, 0, 0);
+    lv_obj_set_pos(grid_, 0, bar);
     lv_obj_add_flag(grid_, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_clear_flag(grid_, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(grid_, drawCb, LV_EVENT_DRAW_MAIN, nullptr);
@@ -122,7 +129,7 @@ bool PeriodicApp::open(void)
 
     detail_ = lv_label_create(root_);
     lv_obj_set_width(detail_, w - 8);
-    lv_obj_set_pos(detail_, 4, gridH + 1);
+    lv_obj_set_pos(detail_, 4, bar + gridH + 1);
     lv_obj_set_style_text_font(detail_, &lv_font_montserrat_12, LV_PART_MAIN);
     lv_obj_set_style_text_color(detail_, lv_color_hex(0xC8D2DC), LV_PART_MAIN);
     lv_label_set_long_mode(detail_, LV_LABEL_LONG_WRAP);
@@ -195,9 +202,9 @@ void PeriodicApp::drawCb(lv_event_t *e)
             const int z = chem::TABLE_LAYOUT[row][col];
             if (z < 1) continue;
 
-            lv_area_t cell = {ox + col * kCellW, oy + row * kCellH,
+            lv_area_t cell = {ox + col * kCellW, oy + row * app->cellH_,
                               ox + col * kCellW + kCellW - 1,
-                              oy + row * kCellH + kCellH - 1};
+                              oy + row * app->cellH_ + app->cellH_ - 1};
             if (cell.x2 < clip->x1 || cell.x1 > clip->x2 ||
                 cell.y2 < clip->y1 || cell.y1 > clip->y2)
             {
@@ -245,7 +252,7 @@ void PeriodicApp::pressedCb(lv_event_t *e)
     const int y = p.y - origin.y1;
     if (x < 0 || y < 0) return;
     const int col = x / kCellW;
-    const int row = y / kCellH;
+    const int row = y / s_active->cellH_;
     if (col >= kCols || row >= kRows) return;
 
     const int z = chem::TABLE_LAYOUT[row][col];
