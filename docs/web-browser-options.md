@@ -88,6 +88,41 @@ DOM/CSS/JS engine. It removes the "there is no room at all" objection, which is
 why the engine work below is worth doing against this table rather than the
 current one.
 
+## Where the browser work starts
+
+The three candidates above are all LVGL 9 renderers. The route that does not
+require moving wadamesh off LVGL 8.3 is to keep the engine's pixels out of
+LVGL's object tree entirely:
+
+* **HTML/CSS:** [litehtml](https://github.com/litehtml/litehtml) with
+  gumbo-parser as the HTML front end. litehtml implements CSS 2.1 plus a useful
+  part of CSS3 (floats, tables, absolute positioning, margins/padding/borders,
+  backgrounds, some flex) and exposes a `document_container` interface for
+  drawing and for fetching resources, so it can be hosted anywhere.
+* **JavaScript:** [Duktape](https://duktape.org) (the engine TactileBrowser uses
+  on ESP32): ~200 KB of C, no JIT, no ICU. A first cut runs page scripts against
+  a DOM shim that writes through the same layout invalidation path.
+* **Rendering:** one offscreen RGB565 canvas owned by the browser page. The
+  `document_container` implementation draws backgrounds/borders as rects and
+  glyph runs through LVGL's draw API (or its own blend for text), then the page
+  blits the visible band into an `lv_canvas` — the same tiling strategy the map
+  already uses, so scrolling does not re-layout the page.
+
+Milestones, in order:
+
+1. gumbo + litehtml compiled into a `WADAMESH_BROWSER` env, with a host test
+   that lays out a local HTML file and asserts box positions.
+2. `document_container` drawing into a canvas, static page, no scripts, no
+   images; measure layout+draw time on the S3's PSRAM budget.
+3. Duktape with `document`/`window` shims, `onclick`/`onload` and
+   `innerHTML` re-layout.
+4. Wire the Reader's fetch path (HTTP(S), `setInsecure()`) as the byte source and
+   the existing Reader bar as the chrome.
+
+Nothing in this section is compiled yet: it is the implementation plan that
+follows from the survey, and it is the one path that fits LVGL 8.3 rather than
+replacing the whole UI toolkit.
+
 ## Why none of them drops in
 
 * **No room in the image.** A DOM + CSS layout engine plus a JS engine is

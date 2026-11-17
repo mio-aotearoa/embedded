@@ -76,9 +76,12 @@ Browser-engine options (TactileBrowser, eBrowser, Agave) are compared in
 what the Reader can do (no CSS, no JavaScript) and
 `firmware/tdeck-plus/partitions_tdeck_browser.csv` — a 7.75 MB single-app
 partition table with no OTA slot (updates over USB), keeping the map tiles and
-user data. librime is not included: it needs Boost/leveldb/marisa/OpenCC and has
-no ESP32 port, so there is no CJK input method; the CJK font options (flash or
-SD card) are in [`docs/cjk-rendering.md`](docs/cjk-rendering.md).
+user data. librime is not included (Boost/leveldb/marisa/OpenCC, no ESP32 port).
+`third_party/lvgl_pinyin_ime` is pinned instead: its LVGL 9.5 widget does not
+build against this firmware's LVGL 8.3, but its vendored libgooglepinyin engine
+is portable and `scripts/pinyin-dict.sh` builds the 1 MB dictionary for
+`/sd/ime/dict_pinyin.dat`. The remaining work — an LVGL 8 candidate UI and CJK
+glyphs — is tracked in [`docs/cjk-rendering.md`](docs/cjk-rendering.md).
 
 **reTerminal E1002** — esp32-photoframe owns boot, storage, image pipeline and
 deep sleep. An ESP-IDF component (`components/airdrop_bridge`) compiles

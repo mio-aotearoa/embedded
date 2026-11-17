@@ -13,3 +13,6 @@
 [submodule "third_party/neocalculator"]
 	path = third_party/neocalculator
 	url = https://github.com/El-EnderJ/NeoCalculator
+[submodule "third_party/lvgl_pinyin_ime"]
+	path = third_party/lvgl_pinyin_ime
+	url = https://github.com/VanillaNahida/lvgl_pinyin_ime

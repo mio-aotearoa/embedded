@@ -97,14 +97,25 @@ Then:
 
 ## Input is a separate problem
 
-### librime
+### lvgl_pinyin_ime
 
-`rime/librime` is **not** in this tree. It is a desktop C++17 library whose
-build needs Boost ≥1.74, leveldb, marisa, OpenCC and yaml-cpp through CMake;
-there is no ESP-IDF port (Xmake's platform list has no xtensa/ESP32 target),
-and nothing would link on the S3. Adding the submodule without that port would
-be ~30 MB of unbuildable source, so the honest status is: not added, and CJK
-input is not available from RIME. A small table IME remains the feasible route:
+`third_party/lvgl_pinyin_ime` is pinned (1e2aa50) as the input-method
+candidate. Its widget is an **LVGL 9.5 / ESP-IDF 6.1** component and this
+firmware is Arduino/PlatformIO on **LVGL 8.3.11**, so the widget — keyboards,
+candidate UI, embedded font arrays — does not compile here and is not wired in.
+
+What is portable is the engine it vendors: libgooglepinyin (Apache-2.0, under
+`src/third_party/libgooglepinyin`) is plain C++ with a C API
+(`im_open_decoder` / `im_search` / `im_get_candidate`). `scripts/pinyin-dict.sh`
+builds its dictionary builder with the host compiler and turns the pinned
+`data/dict/rawdict_utf16_65105_freq.txt` + `valid_utf16.txt` into
+`out/dict_pinyin.dat` — a 1,068,442-byte card asset for
+`/sd/ime/dict_pinyin.dat`, not firmware. librime is not used at all: it needs
+Boost/leveldb/marisa/OpenCC and has no ESP32 port.
+
+Still missing for a working IME: an LVGL 8.3 candidate/keyboard UI, and CJK
+glyphs to draw the candidates with (next section). Until both exist there is no
+CJK input in this firmware, and no code here pretends otherwise.
 
 Rendering CJK does not give you a way to type it, so CJK input needs a small
 table IME:
