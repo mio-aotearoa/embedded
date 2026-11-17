@@ -50,8 +50,11 @@ class ZimArchive
     bool resolve(const ZimEntry &entry, ZimEntry &out, int depth = 0);
     bool mainPage(ZimEntry &out);
 
-    // Case-insensitive prefix search over the title pointer list (binary search
-    // plus a forward scan for the prefix). `limit` caps the returned matches.
+    // Case-insensitive prefix search over the title pointer list. The list is
+    // ordered by <namespace><title> in byte order (ZIM spec), so the search
+    // binary-searches that exact order and tries the common case variants of
+    // the query; a case-insensitive comparison over the raw list would probe
+    // outside the matching range. `limit` caps the returned matches.
     std::vector<ZimEntry> searchTitles(const char *prefix, size_t limit);
     bool findByTitle(const char *prefix, ZimEntry &out);
 
@@ -70,6 +73,9 @@ class ZimArchive
     bool readDirentAt(uint64_t off, ZimEntry &out);
     bool readCluster(uint32_t cluster, std::vector<uint8_t> &out, char *err, size_t errCap);
     bool titlePointer(uint32_t titleIndex, uint32_t &entryIndex);
+    bool titleEntryAt(uint32_t titleIndex, char &ns, std::string &title, uint32_t &entryIndex);
+    bool titleNsBounds(char ns, uint32_t &lo, uint32_t &hi);
+    uint32_t titleLowerBound(char ns, const std::string &key, uint32_t lo, uint32_t hi);
 
     FILE *_fp = nullptr;
     std::string _path;

@@ -33,10 +33,15 @@ class KiwixApp
     void showArchives(void);
     void showTitles(const char *prefix);
     bool openArchive(const char *path);
-    void openArticle(const char *title);
+    void openArticle(const ZimEntry &entry);
     void setStatus(const char *msg);
+    void startDownload(const char *url);
 
     static void archiveCb(lv_event_t *e);
+    static void downloadCb(lv_event_t *e);
+    static void urlReadyCb(lv_event_t *e);
+    static void urlCancelCb(lv_event_t *e);
+    static void downloadTickCb(lv_timer_t *t);
     static void itemCb(lv_event_t *e);
     static void searchCb(lv_event_t *e);
     static void destroyAsync(void *p);
@@ -48,9 +53,14 @@ class KiwixApp
     lv_obj_t *list_ = nullptr;
     lv_obj_t *status_ = nullptr;
     lv_obj_t *search_ = nullptr;
+    lv_obj_t *url_ = nullptr;
+    lv_timer_t *dlTimer_ = nullptr;
 
     ZimArchive archive_;
     char archivePaths_[kMaxFiles][192] = {};
     size_t nArchives_ = 0;
-    std::vector<std::string> rowTitles_;
+    // The list rows are keyed by dirent, not by title text: two entries can
+    // share a title prefix, and re-searching for the label would open the
+    // first match instead of the row the user actually tapped.
+    std::vector<ZimEntry> rowEntries_;
 };

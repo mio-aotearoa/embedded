@@ -47,6 +47,16 @@ articles get the native scrolling, keyboard/trackball navigation and back bar.
 ZIM parsing is the only format code we own (libzim needs a desktop C++17/ICU/XZ
 runtime and has no ESP32 target).
 
+Both apps can fill the card themselves: Kiwix downloads a `.zim` from a URL over
+Wi-Fi (a shared `common/http_download.cpp` task writes to `<name>.part` and
+renames only after the last byte), and the `ESP-AI` page fetches the
+slvDev/esp32-ai `model.bin` and `tokenizer.json` into
+`/esp32ai/tinystories/` when they are missing, checking the pinned byte sizes.
+The LLM itself is not generated on the device yet: upstream's runtime reads its
+weights from a flash mapping, and the 14.9 MB model does not fit this board's
+flash layout, so the page manages the assets and says that generation needs the
+runtime port.
+
 **reTerminal E1002** — esp32-photoframe owns boot, storage, image pipeline and
 deep sleep. An ESP-IDF component (`components/airdrop_bridge`) compiles
 ESP32Drop's receive path unmodified behind a small `Arduino.h` shim
@@ -108,8 +118,9 @@ an ordinary program (`nix run`) with a project-local `.platformio/` cache.
 ## Status
 
 The e-paper firmware is complete as described (bridge + two patches). The
-T-Deck firmware is now wadamesh plus the Kiwix app: no MeshCore adapter or UI
-fork remains in this repository, only the parser and the picker.
+T-Deck firmware is wadamesh plus the Kiwix app and the ESP-AI model manager: no
+MeshCore adapter or UI fork remains in this repository, only the parser, the
+picker, the downloader and the model page.
 
 There is **no ESP32 toolchain** here: neither firmware has been compiled or
 flashed. Verified: both patch series apply/revert cleanly; the bridge's calls

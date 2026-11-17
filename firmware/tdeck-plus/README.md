@@ -2,12 +2,13 @@
 
 The T-Deck Plus runs **wadamesh** as published: its MeshCore radio stack, LVGL
 touch UI, contacts/channels, Files, Reader and app drawer. This repository adds
-one app to it, **Kiwix**, which browses ZIM archives (offline Wikipedia and
-friends) from the SD card.
+two apps to it: **Kiwix**, which browses ZIM archives (offline Wikipedia and
+friends) from the SD card, and **ESP-AI**, which manages the slvDev/esp32-ai
+model assets on the card. Both can fetch their data over Wi-Fi.
 
 Upstream is not forked or copied. `third_party/wadamesh` is a pinned submodule;
-the Kiwix app lives here and is compiled into wadamesh's own T-Deck PlatformIO
-environment by a single patch (`patches/wadamesh/0001-kiwix-app.patch`).
+the apps live here and are compiled into wadamesh's own T-Deck PlatformIO
+environment by a single patch (`patches/wadamesh/0001-kiwix-and-esp32ai-apps.patch`).
 
 ## Layout
 
@@ -17,9 +18,13 @@ firmware/tdeck-plus/
   kiwix/
     zim_reader.{h,cpp}  ZIM v5/v6 parser (uncompressed + zstd clusters)
     kiwix_app.{h,cpp}   app page: archive list -> title search -> Reader
+  esp32ai/
+    esp32ai_app.{h,cpp} model assets on the card, downloaded over Wi-Fi
+  common/
+    http_download.{h,cpp}  one HTTP(S) -> SD transfer, on its own task
   test/host/            host test for the parser (no ESP32 needed)
 patches/wadamesh/
-  0001-kiwix-app.patch  build wiring + drawer tile + Reader bridge
+  0001-kiwix-and-esp32ai-apps.patch  build wiring + drawer tiles + Reader bridge
 ```
 
 ## How the pieces fit

@@ -97,22 +97,43 @@ the firmware's mount policy or open-file budget.
 
 ### wadamesh changes (patch series)
 
-`patches/wadamesh/0001-kiwix-app.patch` is the whole integration:
+`patches/wadamesh/0001-kiwix-and-esp32ai-apps.patch` is the whole integration:
 
-1. `#include "kiwix_app.h"` beside the other app modules.
-2. `APPACT_KIWIX` in the drawer action enum, a `Kiwix` tile (gated on
-   `CAP_FILESYSTEM`, since the app needs the card), and its `appLaunch()` case.
+1. `#include "kiwix_app.h"` / `"esp32ai_app.h"` beside the other app modules.
+2. `APPACT_KIWIX` and `APPACT_ESP32AI` in the drawer action enum, a `Kiwix`
+   tile (gated on `CAP_FILESYSTEM`, since the app needs the card) plus an
+   `ESP-AI` tile, and their `appLaunch()` cases.
 3. `extern "C" void wadameshOpenReaderUrl(const char*)` at the end of
    `UITask.cpp`, a one-line wrapper around the existing `openReaderPage()`.
 4. `platformio.ini` (T-Deck env only): include paths for
-   `firmware/tdeck-plus/kiwix` and `third_party/zstd/lib`, the zstd
-   decompress-only defines, and `build_src_filter` entries compiling our app
-   and zstd's `common/` + `decompress/` sources into the firmware. The filter
-   paths climb out of the project (`../../../firmware/...`) exactly as
-   wadamesh's own variant filter climbs to `../variants/`.
+   `firmware/tdeck-plus/{kiwix,common,esp32ai}` and `third_party/zstd/lib`, the
+   zstd decompress-only defines, and `build_src_filter` entries compiling our
+   apps, the shared downloader and zstd's `common/` + `decompress/` sources into
+   the firmware. The filter paths climb out of the project
+   (`../../../firmware/...`) exactly as wadamesh's own variant filter climbs to
+   `../variants/`.
 
 No wadamesh logic is changed; `scripts/patches.sh revert wadamesh` restores the
 pinned tree.
+
+### Wi-Fi downloads
+
+`firmware/tdeck-plus/common/http_download.cpp` is the one transfer path both
+apps use: an `HTTPClient` GET (redirects followed, `identity` encoding) written
+straight to `<dest>.part` on the SD card from a 12 KB FreeRTOS task, renamed to
+its real name only after the last byte arrived. Callers poll
+`httpDownloadState()` from an `lv_timer`, so the LVGL task never blocks on the
+network or the card.
+
+Two properties are deliberate:
+
+* **TLS is `setInsecure()`.** The firmware has no certificate store, exactly
+  like the Reader's HTTPS path, so a download proves nothing about the server.
+  The esp32-ai assets pin their byte sizes (from upstream's `fetch_model.sh`) so
+  a truncated transfer is refused; ZIM downloads have no pinned size or hash.
+* **One transfer at a time,** with cancellation on page teardown. A cancelled
+  or failed transfer deletes the `.part` file and leaves the previous file of
+  that name untouched.
 
 ### Deliberately out of scope (today)
 
@@ -214,19 +235,30 @@ PlatformIO cache lives outside the store.
 These were evaluated against the pinned upstreams; none is a small app-page
 change, so none is faked in the tree.
 
-### esp32-ai (`slvDev/esp32-ai`)
+### esp32-ai (`slvDev/esp32-ai`) — model assets on the card, runtime not ported
 
 It is not a library or an AI service client: it is a set of standalone Arduino
 sketches running a 28.9M-parameter TinyStories model locally, with 14.9 MB of
 4-bit weights in a **dedicated `model` flash partition** (`partitions.csv`:
-app 1 MB, model 14.9 MB), plus a custom runtime (`runtime/llm.h`) and Xtensa
-SIMD code. The T-Deck's 16 MB flash is already fully allocated (two 3.875 MB
-OTA slots + 4.75 MB map tiles + 3.375 MB SPIFFS), and wadamesh is a ~2.55 MB
-app. There is no room for the model without a separate partition table that
-drops OTA and the tile cache, and the sketch has to be rewritten into a
-wadamesh app page. That is a separate firmware variant and a real port, not a
-submodule plus an app tile; the model also only writes TinyStories text (no
-question answering).
+app 1 MB, model 14.9 MB), plus a custom runtime and Xtensa SIMD code. The
+T-Deck's 16 MB flash is already fully allocated (two 3.875 MB OTA slots +
+4.75 MB map tiles + 3.375 MB SPIFFS), and wadamesh is a ~2.55 MB app, so the
+model cannot get a flash partition here without dropping OTA and the tile
+cache.
+
+What this repository does wire in is the storage half: `firmware/tdeck-plus/esp32ai/`
+is an `ESP-AI` app page that keeps the release's `model.bin` and
+`tokenizer.json` at `/esp32ai/tinystories/` on the SD card, shows whether each
+file is present and complete, and fetches it over Wi-Fi through the shared
+downloader when it is not. The byte sizes are pinned from upstream's
+`scripts/fetch_model.sh`, so a truncated transfer is refused.
+
+Text generation still needs a real port: upstream's loader memory-maps the
+weights from a flash partition and compiles model-specific headers at deploy
+time, so pointing it at an SD file means replacing its weight access path with
+per-token `pread`s and reproducing the header generation here. That is a port
+of the runtime, not an app tile, and it is not faked with a placeholder
+generator. The page says so on screen.
 
 ### CJK rendering
 
@@ -270,6 +302,34 @@ no image bubble.)
   next to FAT. On the E1002 the storage path is LittleFS on flash; an ext4 SD
   volume would need the same block-device work. That is a feature branch of its
   own, and it cannot be compile-checked in this checkout.
+
+## UI performance
+
+The UI performance question was checked against
+[`andrisgauracs/bevel-os`](https://github.com/andrisgauracs/bevel-os), which is
+an ESP32-S3 desktop written from scratch (no LVGL) and reports 60–76 FPS. Its
+main techniques are: render into internal RAM and write to PSRAM once, track
+damage rectangles instead of redrawing frames, keep the scan-out interrupt and
+the GUI task on the same core, and keep the pointer out of the framebuffer.
+
+The first two are already in wadamesh, with measurements recorded in the code:
+
+* `LV_DISP_DEF_REFR_PERIOD` is **16 ms** in `include/lv_conf.h`, not LVGL's
+  30 ms default, so the refresh loop is not capped at ~33 FPS.
+* The T-Deck draw band is a 12800 px (40-row) PSRAM band chosen by the frame
+  benchmark on hardware (comment at the draw-buffer allocation in `UITask.cpp`),
+  and LVGL only renders invalidated areas.
+* LVGL is built `-O2` with `lv_draw_sw_blend.c` / `lv_draw_label.c` in IRAM
+  (`custom_lvgl_o2` / `custom_lvgl_iram` in `platformio.ini`), and the UI task
+  is what drives `lv_timer_handler`.
+
+The remaining candidates are the ones bevel-os cannot hand over directly:
+band size and buffer placement (PSRAM vs internal DMA RAM) are already tuned by
+that benchmark, and the per-frame cost of `lv_layer_top` overlays is a
+structural issue in wadamesh's app pages, noted at the drawer in `UITask.cpp`.
+Changing either without running the on-device frame benchmark would be a guess,
+so this repository does not claim a speed-up: measure with the existing
+`BENCH_BAND_W` / `BENCH_BUF_PSRAM` benchmark build before changing a default.
 
 ## Verification status
 

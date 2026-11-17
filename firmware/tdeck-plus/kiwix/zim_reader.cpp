@@ -268,78 +268,213 @@ bool ZimArchive::titlePointer(uint32_t titleIndex, uint32_t &entryIndex)
     return readU32(_titlePtrPos + (uint64_t)titleIndex * 4, entryIndex);
 }
 
+namespace
+{
+// Byte-order comparison of a title-list entry against a search key, which is
+// the order the list itself uses: namespace first, then the title bytes.
+int cmpTitleKey(char entryNs, const std::string &entryTitle, char ns, const std::string &key)
+{
+    if (entryNs != ns) {
+        return (unsigned char)entryNs < (unsigned char)ns ? -1 : 1;
+    }
+    return entryTitle.compare(key);
+}
+
+bool startsWithCi(const std::string &title, const std::string &prefix)
+{
+    if (title.size() < prefix.size()) {
+        return false;
+    }
+    for (size_t i = 0; i < prefix.size(); i++) {
+        if (lower(title[i]) != lower(prefix[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void addVariant(std::vector<std::string> &keys, const std::string &key)
+{
+    if (key.empty()) {
+        return;
+    }
+    for (const std::string &k : keys) {
+        if (k == key) {
+            return;
+        }
+    }
+    keys.push_back(key);
+}
+
+// The user types on a T-Deck keyboard, so the case they type is not the case
+// the archive stored. Each variant is searched with a byte-order lower bound,
+// which is the only comparison the title list is actually sorted by.
+std::vector<std::string> titleKeys(const char *prefix)
+{
+    const std::string typed(prefix);
+    std::vector<std::string> keys;
+    addVariant(keys, typed);
+
+    std::string lowerKey = typed;
+    for (char &c : lowerKey) c = lower(c);
+    addVariant(keys, lowerKey);
+
+    std::string upperKey = typed;
+    for (char &c : upperKey) c = (char)toupper((unsigned char)c);
+    addVariant(keys, upperKey);
+
+    std::string capKey = lowerKey;
+    if (!capKey.empty()) {
+        capKey[0] = (char)toupper((unsigned char)capKey[0]);
+    }
+    addVariant(keys, capKey);
+    return keys;
+}
+} // namespace
+
+bool ZimArchive::titleEntryAt(uint32_t titleIndex, char &ns, std::string &title, uint32_t &entryIndex)
+{
+    if (!titlePointer(titleIndex, entryIndex)) {
+        return false;
+    }
+    ZimEntry e;
+    if (!direntAt(entryIndex, e)) {
+        return false;
+    }
+    ns = e.ns;
+    title = e.title;
+    return true;
+}
+
+// [lo, hi) is the sub-range of the title list that holds namespace `ns`.
+bool ZimArchive::titleNsBounds(char ns, uint32_t &lo, uint32_t &hi)
+{
+    const unsigned char want = (unsigned char)ns;
+    uint32_t a = 0, b = _entryCount;
+    while (a < b) {
+        const uint32_t mid = a + (b - a) / 2;
+        char mns;
+        std::string title;
+        uint32_t entryIndex = 0;
+        if (!titleEntryAt(mid, mns, title, entryIndex)) {
+            return false;
+        }
+        if ((unsigned char)mns < want) {
+            a = mid + 1;
+        } else {
+            b = mid;
+        }
+    }
+    lo = a;
+    b = _entryCount;
+    while (a < b) {
+        const uint32_t mid = a + (b - a) / 2;
+        char mns;
+        std::string title;
+        uint32_t entryIndex = 0;
+        if (!titleEntryAt(mid, mns, title, entryIndex)) {
+            return false;
+        }
+        if ((unsigned char)mns <= want) {
+            a = mid + 1;
+        } else {
+            b = mid;
+        }
+    }
+    hi = a;
+    return lo < hi;
+}
+
+// First index in [lo, hi) whose (namespace, title) is not < (ns, key).
+uint32_t ZimArchive::titleLowerBound(char ns, const std::string &key, uint32_t lo, uint32_t hi)
+{
+    while (lo < hi) {
+        const uint32_t mid = lo + (hi - lo) / 2;
+        char mns;
+        std::string title;
+        uint32_t entryIndex = 0;
+        if (!titleEntryAt(mid, mns, title, entryIndex)) {
+            return hi;
+        }
+        if (cmpTitleKey(mns, title, ns, key) < 0) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    return lo;
+}
+
 std::vector<ZimEntry> ZimArchive::searchTitles(const char *prefix, size_t limit)
 {
     std::vector<ZimEntry> results;
-    if (!isOpen() || !prefix || !*prefix) {
+    if (!isOpen() || !prefix || !*prefix || _titlePtrPos == 0) {
         return results;
     }
 
-    auto entryTitle = [this](uint32_t titleIndex, std::string &title, uint32_t &entryIndex) {
-        if (!titlePointer(titleIndex, entryIndex)) {
-            return false;
-        }
-        ZimEntry e;
-        if (!direntAt(entryIndex, e)) {
-            return false;
-        }
-        title = e.title;
-        return true;
-    };
-
-    // Binary search for the first title >= prefix, comparing case-insensitively.
-    uint32_t lo = 0, hi = _entryCount;
-    while (lo < hi) {
-        uint32_t mid = lo + (hi - lo) / 2;
-        std::string title;
-        uint32_t entryIndex = 0;
-        if (!entryTitle(mid, title, entryIndex)) {
-            break;
-        }
-        // Compare title against prefix: negative when the title sorts before
-        // the prefix, zero when the prefix is a prefix of the title.
-        size_t n = strlen(prefix);
-        int cmp = 0;
-        for (size_t i = 0; i < n; i++) {
-            if (i >= title.size()) {
-                cmp = -1;
-                break;
-            }
-            int d = lower(prefix[i]) - lower(title[i]);
-            if (d) {
-                cmp = d;
-                break;
+    // Titles are grouped by namespace, and articles all live in one of them.
+    // Take it from the main page when there is one, and always try the classic
+    // article namespaces so archives without a main page still search.
+    std::vector<char> namespaces;
+    ZimEntry main;
+    if (mainPage(main)) {
+        namespaces.push_back(main.ns);
+    }
+    for (char ns : {'A', 'C'}) {
+        bool known = false;
+        for (char n : namespaces) {
+            if (n == ns) {
+                known = true;
             }
         }
-        // cmp == 0 means the title starts with the prefix: that is inside the
-        // range, so it must move the upper bound, not the lower one.
-        if (cmp <= 0) {
-            hi = mid;
-        } else {
-            lo = mid + 1;
+        if (!known) {
+            namespaces.push_back(ns);
         }
     }
 
-    for (uint32_t i = lo; i < _entryCount && results.size() < limit; i++) {
-        std::string title;
-        uint32_t entryIndex = 0;
-        if (!entryTitle(i, title, entryIndex)) {
-            break;
+    const std::vector<std::string> keys = titleKeys(prefix);
+    std::vector<uint32_t> seen;
+    for (char ns : namespaces) {
+        uint32_t lo = 0, hi = 0;
+        if (!titleNsBounds(ns, lo, hi)) {
+            continue;
         }
-        size_t n = strlen(prefix);
-        bool matches = true;
-        for (size_t k = 0; k < n; k++) {
-            if (k >= title.size() || lower(title[k]) != lower(prefix[k])) {
-                matches = false;
-                break;
+        for (const std::string &key : keys) {
+            for (uint32_t i = titleLowerBound(ns, key, lo, hi); i < hi; i++) {
+                char mns;
+                std::string title;
+                uint32_t entryIndex = 0;
+                if (!titleEntryAt(i, mns, title, entryIndex)) {
+                    break;
+                }
+                // Entries are byte-sorted, so the first title that no longer
+                // matches the key ends this run of matches.
+                if (mns != ns || !startsWithCi(title, key)) {
+                    break;
+                }
+                bool dup = false;
+                for (uint32_t s : seen) {
+                    if (s == entryIndex) {
+                        dup = true;
+                        break;
+                    }
+                }
+                if (dup) {
+                    continue;
+                }
+                seen.push_back(entryIndex);
+
+                ZimEntry e;
+                if (direntAt(entryIndex, e)) {
+                    ZimEntry resolved;
+                    if (resolve(e, resolved) && !resolved.isRedirect) {
+                        results.push_back(resolved);
+                    }
+                }
+                if (results.size() >= limit) {
+                    return results;
+                }
             }
-        }
-        if (!matches) {
-            break;
-        }
-        ZimEntry e;
-        if (direntAt(entryIndex, e)) {
-            results.push_back(e);
         }
     }
     return results;

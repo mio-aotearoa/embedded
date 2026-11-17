@@ -11,6 +11,7 @@
 #include "kiwix_app.h"
 
 #include "AppPage.h"     // wadamesh app-page chrome: root, "< title" bar, async teardown
+#include "http_download.h"  // Wi-Fi -> SD downloader shared with the ESP-AI page
 #include "i18n.h"        // TR()
 #include "zim_reader.h"  // ZIM v5/v6 parser (this folder)
 #include "src/extra/libs/sjpg/tjpgd.h"  // wadamesh's JPEG decoder (same copy UITask uses)
@@ -38,6 +39,11 @@ constexpr const char* kSdMount = "/sd";
 constexpr size_t kMaxArticleBytes = 220 * 1024;
 constexpr const char* kWorkDir = "/meshcomod/kiwix";
 constexpr const char* kArticleUrl = "sd:/meshcomod/kiwix/article.htm";
+constexpr const char* kDownloadDir = "/kiwix";
+// A small, stable archive from the Kiwix mirror, offered as the starting point
+// for the URL field; any .zim URL can be typed over it.
+constexpr const char* kDefaultZimUrl =
+    "https://download.kiwix.org/zim/wikipedia/speedtest_en_blob-mini_2024-05.zim";
 
 // ---- article images -------------------------------------------------------
 // ZIM HTML points at images with ZIM paths ("../I/foo.jpg"). The Reader is a
@@ -193,6 +199,28 @@ static bool firstImageSrc(const std::vector<uint8_t>& html, std::string& out)
     return false;
 }
 
+// ".../wikipedia_en_all_nopic.zim?x=1" -> "wikipedia_en_all_nopic.zim"; the
+// name is used as a file name, so anything unusual is rejected.
+std::string zimNameFromUrl(const char* url)
+{
+    if (!url) return {};
+    std::string s(url);
+    const size_t cut = s.find_first_of("?#");
+    if (cut != std::string::npos) s.resize(cut);
+    const size_t slash = s.rfind('/');
+    std::string name = slash == std::string::npos ? s : s.substr(slash + 1);
+    if (name.size() < 5) return {};
+    for (char c : name)
+    {
+        const unsigned char u = (unsigned char)c;
+        if (!(isalnum(u) || c == '.' || c == '-' || c == '_')) return {};
+    }
+    std::string lower = name;
+    for (char& c : lower) c = (char)tolower((unsigned char)c);
+    if (lower.rfind(".zim") != lower.size() - 4) return {};
+    return name;
+}
+
 bool endsWithZim(const char* name)
 {
     const size_t n = strlen(name);
@@ -289,6 +317,17 @@ bool KiwixApp::open(void)
     lv_obj_add_event_cb(search_, searchCb, LV_EVENT_READY, nullptr);
     lv_obj_add_flag(search_, LV_OBJ_FLAG_HIDDEN);
 
+    // URL field for the Wi-Fi download; only shown after tapping the download
+    // row, so the archive list keeps the screen otherwise.
+    url_ = lv_textarea_create(root_);
+    lv_textarea_set_one_line(url_, true);
+    lv_textarea_set_placeholder_text(url_, TR("https://\xE2\x80\xA6.zim"));
+    lv_obj_set_size(url_, w - 8, 34);
+    lv_obj_set_pos(url_, 4, 40);
+    lv_obj_add_event_cb(url_, urlReadyCb, LV_EVENT_READY, nullptr);
+    lv_obj_add_event_cb(url_, urlCancelCb, LV_EVENT_CANCEL, nullptr);
+    lv_obj_add_flag(url_, LV_OBJ_FLAG_HIDDEN);
+
     list_ = lv_list_create(root_);
     lv_obj_set_pos(list_, 0, 40);
     lv_obj_set_size(list_, w, h - 64);
@@ -307,6 +346,12 @@ bool KiwixApp::open(void)
 
 void KiwixApp::close(void)
 {
+    httpDownloadCancel();
+    if (dlTimer_)
+    {
+        lv_timer_del(dlTimer_);
+        dlTimer_ = nullptr;
+    }
     appPageEnd(&KiwixApp::dismiss);      // hand the status bar back
     appPageDeleteRootAsync(root_);       // never a sync delete from a callback
     root_ = nullptr;
@@ -314,8 +359,21 @@ void KiwixApp::close(void)
     status_ = nullptr;
     search_ = nullptr;
     archive_.close();
-    rowTitles_.clear();
+    rowEntries_.clear();
     nArchives_ = 0;
+
+    // The article-image overlay lives on lv_layer_top, outside root_, so it
+    // would outlive the page if the app is torn down while it is showing.
+    if (s_imgOverlay)
+    {
+        lv_obj_del(s_imgOverlay);
+        s_imgOverlay = nullptr;
+    }
+    if (s_imgBuf)
+    {
+        heap_caps_free(s_imgBuf);
+        s_imgBuf = nullptr;
+    }
 }
 
 void KiwixApp::setStatus(const char* msg) { if (status_) lv_label_set_text(status_, msg ? msg : ""); }
@@ -323,10 +381,12 @@ void KiwixApp::setStatus(const char* msg) { if (status_) lv_label_set_text(statu
 void KiwixApp::showArchives(void)
 {
     archive_.close();
-    rowTitles_.clear();
+    rowEntries_.clear();
     nArchives_ = 0;
     lv_obj_clean(list_);
     if (search_) lv_obj_add_flag(search_, LV_OBJ_FLAG_HIDDEN);
+    if (url_) lv_obj_add_flag(url_, LV_OBJ_FLAG_HIDDEN);
+    if (list_) lv_obj_clear_flag(list_, LV_OBJ_FLAG_HIDDEN);
 
     File dir = SD.open("/");
     if (!dir)
@@ -349,6 +409,9 @@ void KiwixApp::showArchives(void)
         f.close();
     }
     dir.close();
+
+    lv_obj_t* dl = lv_list_add_btn(list_, nullptr, TR("Download .zim over Wi-Fi"));
+    if (dl) lv_obj_add_event_cb(dl, downloadCb, LV_EVENT_CLICKED, nullptr);
 
     setStatus(nArchives_ ? TR("Pick an archive") : TR("No .zim archive on the card"));
 }
@@ -374,7 +437,7 @@ void KiwixApp::showTitles(const char* prefix)
         showArchives();
         return;
     }
-    rowTitles_.clear();
+    rowEntries_.clear();
     lv_obj_clean(list_);
     if (search_) lv_obj_clear_flag(search_, LV_OBJ_FLAG_HIDDEN);
 
@@ -385,44 +448,45 @@ void KiwixApp::showTitles(const char* prefix)
         ZimEntry main;
         if (archive_.mainPage(main) && !main.title.empty())
         {
-            rowTitles_.push_back(main.title);
+            rowEntries_.push_back(main);
             lv_obj_t* row = lv_list_add_btn(list_, nullptr, main.title.c_str());
-            if (row) lv_obj_add_event_cb(row, itemCb, LV_EVENT_CLICKED, (void*)(uintptr_t)rowTitles_.size());
+            if (row) lv_obj_add_event_cb(row, itemCb, LV_EVENT_CLICKED, (void*)(uintptr_t)rowEntries_.size());
         }
         setStatus(TR("Type a title prefix, then Enter"));
         return;
     }
 
     const std::vector<ZimEntry> hits = archive_.searchTitles(prefix, kMaxResults);
-    for (const ZimEntry& entry : hits)
+    for (ZimEntry entry : hits)
     {
-        if (entry.title.empty()) continue;
-        rowTitles_.push_back(entry.title);
-        lv_obj_t* row = lv_list_add_btn(list_, nullptr, entry.title.c_str());
-        if (row) lv_obj_add_event_cb(row, itemCb, LV_EVENT_CLICKED, (void*)(uintptr_t)rowTitles_.size());
+        ZimEntry resolved;
+        if (!archive_.resolve(entry, resolved) || resolved.title.empty()) continue;
+        rowEntries_.push_back(resolved);
+        lv_obj_t* row = lv_list_add_btn(list_, nullptr, resolved.title.c_str());
+        if (row) lv_obj_add_event_cb(row, itemCb, LV_EVENT_CLICKED, (void*)(uintptr_t)rowEntries_.size());
     }
     char msg[48];
-    snprintf(msg, sizeof msg, TR("%u match(es)"), (unsigned)rowTitles_.size());
+    snprintf(msg, sizeof msg, TR("%u match(es)"), (unsigned)rowEntries_.size());
     setStatus(msg);
 }
 
-void KiwixApp::openArticle(const char* title)
+void KiwixApp::openArticle(const ZimEntry& entry)
 {
     char err[96];
-    ZimEntry entry;
-    if (!archive_.findByTitle(title, entry) || !archive_.resolve(entry, entry))
+    ZimEntry article;
+    if (!archive_.resolve(entry, article))
     {
         setStatus(TR("Article not found"));
         return;
     }
-    if (!isTextMime(entry.mimeType))
+    if (!isTextMime(article.mimeType))
     {
         setStatus(TR("Not a text article"));
         return;
     }
 
     std::vector<uint8_t> html;
-    if (!archive_.readBlob(entry, html, err, sizeof err))
+    if (!archive_.readBlob(article, html, err, sizeof err))
     {
         setStatus(err);
         return;
@@ -449,7 +513,7 @@ void KiwixApp::openArticle(const char* title)
 
     // Show the article's first image (if any) before the Reader takes over;
     // a tap continues to the article. No image: go straight to the Reader.
-    if (hasImage && showArticleImage(archive_, imageSrc, entry)) return;
+    if (hasImage && showArticleImage(archive_, imageSrc, article)) return;
 
     dismiss();
     wadameshOpenReaderUrl(kArticleUrl);
@@ -467,8 +531,8 @@ void KiwixApp::itemCb(lv_event_t* e)
 {
     if (!s_active) return;
     const size_t idx = (size_t)(uintptr_t)lv_event_get_user_data(e);
-    if (idx == 0 || idx > s_active->rowTitles_.size()) return;
-    s_active->openArticle(s_active->rowTitles_[idx - 1].c_str());
+    if (idx == 0 || idx > s_active->rowEntries_.size()) return;
+    s_active->openArticle(s_active->rowEntries_[idx - 1]);
 }
 
 void KiwixApp::searchCb(lv_event_t* e)
@@ -477,4 +541,98 @@ void KiwixApp::searchCb(lv_event_t* e)
     if (!s_active || !s_active->search_) return;
     const char* text = lv_textarea_get_text(s_active->search_);
     s_active->showTitles(text ? text : "");
+}
+
+void KiwixApp::downloadCb(lv_event_t* e)
+{
+    (void)e;
+    if (!s_active || !s_active->url_) return;
+    lv_obj_clear_flag(s_active->url_, LV_OBJ_FLAG_HIDDEN);
+    if (s_active->list_) lv_obj_add_flag(s_active->list_, LV_OBJ_FLAG_HIDDEN);
+    if (!lv_textarea_get_text(s_active->url_)[0])
+        lv_textarea_set_text(s_active->url_, kDefaultZimUrl);
+    lv_obj_add_state(s_active->url_, LV_STATE_FOCUSED);
+    s_active->setStatus(TR("Edit the URL, then press Enter"));
+}
+
+void KiwixApp::urlReadyCb(lv_event_t* e)
+{
+    (void)e;
+    if (!s_active || !s_active->url_) return;
+    s_active->startDownload(lv_textarea_get_text(s_active->url_));
+}
+
+void KiwixApp::urlCancelCb(lv_event_t* e)
+{
+    (void)e;
+    if (!s_active) return;
+    if (s_active->url_) lv_obj_add_flag(s_active->url_, LV_OBJ_FLAG_HIDDEN);
+    if (s_active->list_) lv_obj_clear_flag(s_active->list_, LV_OBJ_FLAG_HIDDEN);
+    s_active->setStatus(TR("Pick an archive"));
+}
+
+void KiwixApp::startDownload(const char* url)
+{
+    const std::string name = zimNameFromUrl(url);
+    if (name.empty())
+    {
+        setStatus(TR("Enter a full .zim URL"));
+        return;
+    }
+    if (httpDownloadBusy())
+    {
+        setStatus(TR("A download is already running"));
+        return;
+    }
+    SD.mkdir(kDownloadDir);
+    char dest[160];
+    snprintf(dest, sizeof dest, "%s/%s", kDownloadDir, name.c_str());
+    if (!httpDownloadStart(url, dest, 0))
+    {
+        setStatus(TR("Cannot start the download"));
+        return;
+    }
+    if (!dlTimer_) dlTimer_ = lv_timer_create(downloadTickCb, 400, nullptr);
+    setStatus(TR("Starting the download\xE2\x80\xA6"));
+}
+
+void KiwixApp::downloadTickCb(lv_timer_t* t)
+{
+    (void)t;
+    KiwixApp* app = s_active;
+    if (!app) return;
+    const HttpDownloadState& st = httpDownloadState();
+
+    if (st.running)
+    {
+        char msg[128];
+        if (st.total)
+        {
+            snprintf(msg, sizeof msg, "%s %u%% (%u/%u MB)", TR("Downloading"),
+                     (unsigned)((st.bytes * 100) / st.total),
+                     (unsigned)(st.bytes / (1024 * 1024)),
+                     (unsigned)(st.total / (1024 * 1024)));
+        }
+        else
+        {
+            snprintf(msg, sizeof msg, "%s %u MB", TR("Downloading"),
+                     (unsigned)(st.bytes / (1024 * 1024)));
+        }
+        app->setStatus(msg);
+        return;
+    }
+    if (!st.done) return;
+
+    const bool ok = st.ok;
+    char err[96];
+    snprintf(err, sizeof err, "%s", st.err);
+    httpDownloadClearDone();
+
+    if (app->dlTimer_)
+    {
+        lv_timer_del(app->dlTimer_);
+        app->dlTimer_ = nullptr;
+    }
+    app->showArchives();
+    app->setStatus(ok ? TR("Saved to the card") : (err[0] ? err : TR("Download failed")));
 }

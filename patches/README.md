@@ -24,16 +24,17 @@ numbered patch (the generated `9999-worktree.patch` is a scratch file).
 
 ## wadamesh
 
-* `0001-kiwix-app.patch` — registers this repository's Kiwix app in wadamesh's
-  T-Deck environment. Five small hunks: `include/kiwix_app.h`, one
-  `APPACT_KIWIX` drawer tile (gated on `CAP_FILESYSTEM`), its launch case in
-  `appLaunch()`, and an `extern "C" wadameshOpenReaderUrl()` wrapper around the
-  firmware's existing `openReaderPage()` so articles are rendered by the
-  built-in Reader. `platformio.ini` gets the include paths, zstd defines and
-  `build_src_filter` entries that compile `firmware/tdeck-plus/kiwix/` and the
-  pinned zstd decompressor into the env, plus `-D WADAMESH_KIWIX=1` so every
-  hook is compiled only in that env. No wadamesh source is modified in
-  substance; removing the series restores the upstream tree exactly.
+* `0001-kiwix-and-esp32ai-apps.patch` — registers this repository's two apps in
+  wadamesh's T-Deck environment. Small hunks: the `kiwix_app.h` and
+  `esp32ai_app.h` includes, `APPACT_KIWIX` / `APPACT_ESP32AI` drawer tiles and
+  their `appLaunch()` cases, and an `extern "C" wadameshOpenReaderUrl()` wrapper
+  around the firmware's existing `openReaderPage()` so articles are rendered by
+  the built-in Reader. `platformio.ini` gets the include paths, zstd defines and
+  `build_src_filter` entries that compile `firmware/tdeck-plus/{kiwix,common,esp32ai}/`
+  and the pinned zstd decompressor into the env, plus `-D WADAMESH_KIWIX=1` and
+  `-D WADAMESH_ESP32AI=1` so every hook is compiled only in that env. No
+  wadamesh source is modified in substance; removing the series restores the
+  upstream tree exactly.
 
 ## esp32-photoframe
 

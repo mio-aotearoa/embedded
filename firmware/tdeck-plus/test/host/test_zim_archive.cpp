@@ -1,8 +1,14 @@
 /* Host test for the ZIM parser: builds a minimal, valid, uncompressed ZIM v6
- * archive (one MIME type, two HTML entries, one cluster) and reads it back with
- * ZimArchive. This exercises header parsing, MIME list, path/title pointer
+ * archive (one MIME type, five HTML entries, one cluster) and reads it back
+ * with ZimArchive. This exercises header parsing, MIME list, path/title pointer
  * lists, dirent decoding, title search, redirect-free resolution and blob
  * offset handling without a multi-gigabyte Wikipedia download.
+ *
+ * The title list is written in the order the ZIM spec requires — byte order of
+ * <namespace><title> — so the search is tested against a list where the last
+ * entry ("alphabet") sorts after "Gamma": a case-insensitive comparison over
+ * the raw list would probe past it, and the entries "Gamma" / "Gamma ray"
+ * exercise the shared-prefix case.
  *
  * Build:
  *   g++ -std=gnu++17 -I firmware/tdeck-plus/kiwix -I third_party/zstd/lib
@@ -65,6 +71,26 @@ bool writeFile(const char *path, const std::vector<uint8_t> &bytes)
     fclose(fp);
     return ok;
 }
+
+// Titles of the results, in the order the search returned them.
+std::vector<std::string> resultTitles(const std::vector<ZimEntry> &hits)
+{
+    std::vector<std::string> out;
+    for (const ZimEntry &e : hits) {
+        out.push_back(e.title);
+    }
+    return out;
+}
+
+bool hasTitle(const std::vector<ZimEntry> &hits, const char *title)
+{
+    for (const ZimEntry &e : hits) {
+        if (e.title == title) {
+            return true;
+        }
+    }
+    return false;
+}
 } // namespace
 
 int main(void)
@@ -78,33 +104,47 @@ int main(void)
     z.insert(z.end(), mime, mime + sizeof(mime)); // includes NUL
     z.push_back('\0');                            // empty string terminates list
 
-    const size_t direntA = appendDirent(z, "A", "Alpha", 0, 0);
-    const size_t direntB = appendDirent(z, "B", "Beta", 0, 1);
+    // Entries, in path order (the path pointer list is sorted by path).
+    const char *paths[] = {"A", "B", "C", "D", "E"};
+    const char *titles[] = {"Alpha", "Beta", "alphabet", "Gamma", "Gamma ray"};
+    const char *blobs[] = {"<p>Hello</p>", "<p>World</p>", "<p>letters</p>", "<p>G</p>", "<p>GR</p>"};
+    const size_t entries = sizeof(paths) / sizeof(paths[0]);
 
-    // One uncompressed cluster: info byte, 3 offsets (2 blobs + sentinel),
-    // then the two blobs.
-    const char blobA[] = "<p>Hello</p>";
-    const char blobB[] = "<p>World</p>";
+    size_t direntOff[entries];
+    for (size_t i = 0; i < entries; i++) {
+        direntOff[i] = appendDirent(z, paths[i], titles[i], 0, (uint32_t)i);
+    }
+
+    // One uncompressed cluster: info byte, (entries + 1) offsets, then the blobs.
     const size_t clusterPos = z.size();
     z.push_back(0x01); // uncompressed
     const size_t offsetsPos = z.size();
-    z.resize(z.size() + 12, 0);
-    const uint32_t dataStart = 12;
-    put32(z, offsetsPos + 0, dataStart);
-    put32(z, offsetsPos + 4, dataStart + (uint32_t)strlen(blobA));
-    put32(z, offsetsPos + 8, dataStart + (uint32_t)strlen(blobA) + (uint32_t)strlen(blobB));
-    z.insert(z.end(), blobA, blobA + strlen(blobA));
-    z.insert(z.end(), blobB, blobB + strlen(blobB));
+    z.resize(z.size() + (entries + 1) * 4, 0);
+    const uint32_t dataStart = (uint32_t)((entries + 1) * 4);
+    uint32_t running = dataStart;
+    for (size_t i = 0; i < entries; i++) {
+        put32(z, offsetsPos + i * 4, running);
+        running += (uint32_t)strlen(blobs[i]);
+    }
+    put32(z, offsetsPos + entries * 4, running); // sentinel
+    for (size_t i = 0; i < entries; i++) {
+        z.insert(z.end(), blobs[i], blobs[i] + strlen(blobs[i]));
+    }
 
     const size_t pathPtrPos = z.size();
-    z.resize(z.size() + 16, 0);
-    put64(z, pathPtrPos + 0, direntA);
-    put64(z, pathPtrPos + 8, direntB);
+    z.resize(z.size() + entries * 8, 0);
+    for (size_t i = 0; i < entries; i++) {
+        put64(z, pathPtrPos + i * 8, direntOff[i]);
+    }
 
+    // Title pointer list ordered by <namespace><title> in byte order:
+    // Alpha(0), Beta(1), Gamma(3), "Gamma ray"(4), alphabet(2).
+    const uint32_t titleOrder[] = {0, 1, 3, 4, 2};
     const size_t titlePtrPos = z.size();
-    z.resize(z.size() + 8, 0);
-    put32(z, titlePtrPos + 0, 0); // Alpha (dirent index 0)
-    put32(z, titlePtrPos + 4, 1); // Beta  (dirent index 1)
+    z.resize(z.size() + entries * 4, 0);
+    for (size_t i = 0; i < entries; i++) {
+        put32(z, titlePtrPos + i * 4, titleOrder[i]);
+    }
 
     const size_t clusterPtrPos = z.size();
     z.resize(z.size() + 8, 0);
@@ -116,7 +156,7 @@ int main(void)
     put32(z, 0, 0x044D495Au);
     put16(z, 4, 6); // major
     put16(z, 6, 0); // minor
-    put32(z, 24, 2); // entry count
+    put32(z, 24, (uint32_t)entries);
     put32(z, 28, 1); // cluster count
     put64(z, 32, pathPtrPos);
     put64(z, 40, titlePtrPos);
@@ -137,18 +177,20 @@ int main(void)
         printf("FAIL: open: %s\n", err);
         return 2;
     }
-    if (archive.entryCount() != 2 || archive.clusterCount() != 1 || archive.majorVersion() != 6) {
+    if (archive.entryCount() != (uint32_t)entries || archive.clusterCount() != 1 ||
+        archive.majorVersion() != 6) {
         printf("FAIL: header values\n");
         return 3;
     }
 
-    ZimEntry e0, e1;
-    if (!archive.direntAt(0, e0) || e0.title != "Alpha" || e0.path != "A" || strcmp(e0.mimeType, "text/html") != 0) {
+    ZimEntry e0, e4;
+    if (!archive.direntAt(0, e0) || e0.title != "Alpha" || e0.path != "A" ||
+        strcmp(e0.mimeType, "text/html") != 0) {
         printf("FAIL: dirent 0 (%s/%s/%s)\n", e0.path.c_str(), e0.title.c_str(), e0.mimeType);
         return 4;
     }
-    if (!archive.direntAt(1, e1) || e1.title != "Beta") {
-        printf("FAIL: dirent 1\n");
+    if (!archive.direntAt(4, e4) || e4.title != "Gamma ray") {
+        printf("FAIL: dirent 4 (%s)\n", e4.title.c_str());
         return 5;
     }
 
@@ -173,6 +215,44 @@ int main(void)
     if (!archive.mainPage(main) || main.title != "Alpha") {
         printf("FAIL: main page\n");
         return 9;
+    }
+
+    // An upper-case query must find the mixed-case titles, even though byte
+    // order puts "alphabet" after "Gamma".
+    const std::vector<ZimEntry> upper = archive.searchTitles("GAMMA", 10);
+    if (upper.size() != 2 || !hasTitle(upper, "Gamma") || !hasTitle(upper, "Gamma ray")) {
+        std::vector<std::string> got = resultTitles(upper);
+        printf("FAIL: case search, %u hit(s):", (unsigned)got.size());
+        for (const std::string &t : got) {
+            printf(" \"%s\"", t.c_str());
+        }
+        printf("\n");
+        return 10;
+    }
+
+    // A lower-case query must find a capitalised title.
+    const std::vector<ZimEntry> lower = archive.searchTitles("alpha", 10);
+    if (lower.size() != 2 || !hasTitle(lower, "Alpha") || !hasTitle(lower, "alphabet")) {
+        std::vector<std::string> got = resultTitles(lower);
+        printf("FAIL: lower-case search, %u hit(s):", (unsigned)got.size());
+        for (const std::string &t : got) {
+            printf(" \"%s\"", t.c_str());
+        }
+        printf("\n");
+        return 11;
+    }
+
+    // Rows that share a prefix must stay distinct entries: the app opens the
+    // dirent it was given, not the first title match for the label.
+    const std::vector<ZimEntry> shared = archive.searchTitles("Gamma", 10);
+    if (shared.size() != 2 || shared[0].path == shared[1].path) {
+        printf("FAIL: shared prefix (%u hit(s))\n", (unsigned)shared.size());
+        return 12;
+    }
+
+    if (!archive.searchTitles("zzz", 10).empty()) {
+        printf("FAIL: unrelated query returned hits\n");
+        return 13;
     }
 
     printf("PASS: ZIM header, dirents, titles, cluster and blob offsets\n");
