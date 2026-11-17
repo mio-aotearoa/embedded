@@ -333,8 +333,10 @@ so this repository does not claim a speed-up: measure with the existing
 
 ## Verification status
 
-There is no PlatformIO or ESP-IDF toolchain in this checkout, so neither image
-has been compiled or flashed. What was actually checked:
+The T-Deck Plus image is compiled and linked with the pinned toolchain
+(PlatformIO/espressif32 6.11.0, `LilyGo_TDeck_companion_radio_touch`). The
+E1002 image has not been compiled: it needs the ESP-IDF S3 toolchain. Nothing
+has been flashed or run on hardware. What was actually checked:
 
 * `scripts/patches.sh apply|status|revert` round-trips both series against the
   pinned commits and leaves the submodules clean.
@@ -351,9 +353,17 @@ has been compiled or flashed. What was actually checked:
   g++ against stub ESP-IDF/FreeRTOS headers.
 * Shell scripts are `bash -n` clean.
 
-Not checked: PlatformIO compilation of the wadamesh + Kiwix env (LVGL /
-Arduino headers are not installed here), ESP-IDF compilation of the AirDrop
-listener, and any hardware behaviour.
+* The T-Deck env compiles: `nix run .#firmware` finished in 92 s with
+  `http_download.cpp`, `esp32ai_app.cpp`, `kiwix_app.cpp` and `zim_reader.cpp`
+  in the build, no compiler warnings from them, and 3,859,664 B of image (the
+  app partition is 3.875 MB). `nm` finds `KiwixApp::launch()`,
+  `Esp32AiApp::launch()`, `ZimArchive::searchTitles()` and
+  `httpDownloadStart()` in the ELF.
+
+Not checked: ESP-IDF compilation of the AirDrop listener, and any hardware
+behaviour — Wi-Fi download throughput, TLS handshakes, SD write failures at
+the end of a large file, the Reader's rendering of a downloaded article, and
+esp32-ai token generation.
 
 ## Known gaps / next steps
 

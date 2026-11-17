@@ -122,11 +122,15 @@ T-Deck firmware is wadamesh plus the Kiwix app and the ESP-AI model manager: no
 MeshCore adapter or UI fork remains in this repository, only the parser, the
 picker, the downloader and the model page.
 
-There is **no ESP32 toolchain** here: neither firmware has been compiled or
-flashed. Verified: both patch series apply/revert cleanly; the bridge's calls
-match the pinned ESP32Drop/photoframe headers; the ZIM parser builds and passes
-its host test against the pinned zstd sources; the Arduino shim is
-syntax-checked with stubs. See `docs/architecture.md` for the exact list.
+The **T-Deck Plus image compiles**: `nix run .#firmware` with the pinned
+toolchain (PlatformIO/espressif32 6.11.0) produces
+`third_party/out/LilyGo_TDeck_companion_radio_touch.bin` (3,859,664 bytes),
+with `KiwixApp::launch`, `Esp32AiApp::launch`, `ZimArchive::searchTitles` and
+`httpDownloadStart` linked in. It has **not been flashed or run on hardware**.
+The **E1002 image has not been compiled** — that needs the ESP-IDF S3 toolchain.
+Also verified: both patch series apply/revert cleanly; the bridge's calls match
+the pinned ESP32Drop/photoframe headers; the ZIM parser and companion link pass
+their host tests. See `docs/architecture.md` for the exact list.
 
 ## Licensing
 
