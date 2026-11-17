@@ -23,7 +23,7 @@ constexpr size_t kMaxItems = 80;
 constexpr int kMaxHops = 4;
 
 // GET `url` into `body`, following up to kMaxHops redirects (absolute or relative).
-bool readPage(const char* url, std::string& body, char* err, size_t errLen)
+bool readPageOnce(const char* url, std::string& body, char* err, size_t errLen)
 {
     String current(url);
     for (int hop = 0; hop <= kMaxHops; ++hop)
@@ -78,7 +78,8 @@ bool readPage(const char* url, std::string& body, char* err, size_t errLen)
         }
         if (code != 200)
         {
-            snprintf(err, errLen, "HTTP %d from the catalogue", code);
+            snprintf(err, errLen, "HTTP %d (%s) from the catalogue", code,
+                     HTTPClient::errorToString(code).c_str());
             http.end();
             return false;
         }
@@ -111,6 +112,19 @@ bool readPage(const char* url, std::string& body, char* err, size_t errLen)
         return true;
     }
     snprintf(err, errLen, "too many catalogue redirects");
+    return false;
+}
+
+// One retry on top of readPageOnce. The page is opened right after Wi-Fi comes
+// up, when the first TLS handshake can lose its socket; a bare HTTPClient -1
+// then made the catalogue look broken when a second attempt succeeds.
+bool readPage(const char* url, std::string& body, char* err, size_t errLen)
+{
+    for (int attempt = 0; attempt < 2; ++attempt)
+    {
+        if (readPageOnce(url, body, err, errLen)) return true;
+        if (attempt == 0) delay(300);
+    }
     return false;
 }
 
@@ -248,7 +262,10 @@ bool kiwixCatalogStart(const char* dir)
     s_state.done = false;
     s_state.ok = false;
     s_state.err[0] = '\0';
-    if (xTaskCreate(catalogTask, "kicat", 10240, nullptr, 1, nullptr) != pdPASS)
+    // The same shape as the shared downloader (12 KB/2) and the Reader fetch
+    // (16 KB/4), which do the same HTTPS GET successfully. 10 KB at priority 1
+    // lost the TLS handshake to the UI task often enough to fail with -1.
+    if (xTaskCreate(catalogTask, "kicat", 16384, nullptr, 2, nullptr) != pdPASS)
     {
         s_state.running = false;
         return false;
