@@ -142,7 +142,7 @@ index 484c510..b05aad5 100644
   * Create a page root: full width, from just under the status bar to the bottom of the
   * screen, on lv_layer_top, opaque `bg_color`, non-scrollable and CLICKABLE so no press
 diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
-index 44cc3fc..d2a178e 100644
+index 44cc3fc..390b574 100644
 --- a/src/ui-touch/UITask.cpp
 +++ b/src/ui-touch/UITask.cpp
 @@ -154,6 +154,24 @@ static void* wadaMp3Scratch() { return s_wada_mp3_scratch; }
@@ -203,7 +203,54 @@ index 44cc3fc..d2a178e 100644
  static lv_obj_t*     s_reader_go     = nullptr;
  static lv_obj_t*     s_reader_editbtn= nullptr;    // floating "edit URL" button (shown while reading)
  static lv_obj_t*     s_reader_scroll = nullptr;    // flex-column body container (holds text + link labels)
-@@ -31862,6 +31899,19 @@ static void readerFetchTaskFn(void*) {
+@@ -31804,13 +31841,40 @@ static void readerFetchTaskFn(void*) {
+                                      text_mode ? &txt_size : nullptr, text_mode ? &txt_at : nullptr);
+       source_ok = local_result == ReaderLocalResult::Ok;
+     } else {
++      // Follow redirects here rather than inside HTTPClient: it cannot re-connect
++      // a caller-supplied WiFiClientSecure across hosts, and sites that redirect
++      // (duckduckgo.com, Hugging Face, the Kiwix mirror) then failed as "HTTP -1".
+       HTTPClient httpc;
+-      httpc.setReuse(false); httpc.setConnectTimeout(9000); httpc.setTimeout(15000);
+-      httpc.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS); httpc.setUserAgent("wadamesh-reader");
+-      WiFiClientSecure scli; WiFiClient pcli; bool began;
+-      if (https) { scli.setInsecure(); began = httpc.begin(scli, url); }
+-      else       {                       began = httpc.begin(pcli, url); }
+-      if (began) { httpc.addHeader("Accept-Encoding", "identity"); code = httpc.GET(); }
++      WiFiClientSecure scli; WiFiClient pcli;
++      for (int hop = 0; hop <= 4; ++hop) {
++        httpc.setReuse(false); httpc.setConnectTimeout(9000); httpc.setTimeout(15000);
++        httpc.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
++        httpc.setUserAgent("Mozilla/5.0 (compatible; wadamesh-reader)");
++        const bool tls = readerCiPrefix(url, strlen(url), "https://");
++        bool began;
++        if (tls) { scli.setInsecure(); began = httpc.begin(scli, url); }
++        else     {                     began = httpc.begin(pcli, url); }
++        if (!began) { httpc.end(); break; }
++        httpc.addHeader("Accept-Encoding", "identity");
++        code = httpc.GET();
++        if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
++          String loc = httpc.header("Location");
++          httpc.end();
++          if (!loc.length() || hop == 4) { code = -1; break; }
++          if (loc.startsWith("http")) {
++            snprintf(url, sizeof url, "%s", loc.c_str());
++          } else {
++            const char* scheme = strstr(url, "://");
++            const char* slash = scheme ? strchr(scheme + 3, '/') : nullptr;
++            const size_t base_len = slash ? (size_t)(slash - url) : strlen(url);
++            char next[300];
++            snprintf(next, sizeof next, "%.*s%s", (int)base_len, url, loc.c_str());
++            snprintf(url, sizeof url, "%s", next);
++          }
++          continue;
++        }
++        break;
++      }
+       if (code == HTTP_CODE_OK) {
+         ReaderBufferStream sink(raw, rawcap - 1, generation);
+         const int transfer_result = httpc.writeToStream(&sink);
+@@ -31862,6 +31926,19 @@ static void readerFetchTaskFn(void*) {
        if (txt_at) addLink(TR("Back to the start"), 0);
        s_reader_nlinks = nl;
        snprintf(result_msg, sizeof result_msg, "%s", url); result_ok = true;
@@ -223,7 +270,7 @@ index 44cc3fc..d2a178e 100644
      } else if (s_reader_text) { size_t parsed_links = 0;
        size_t tl = ReaderContent::htmlToText((const char*)raw, total, s_reader_text, kReaderTextCap,
                                              url, s_reader_links, kReaderMaxLinks, &parsed_links);
-@@ -32012,6 +32062,28 @@ static void readerShowLoading() { readerShowMessage(LV_SYMBOL_REFRESH "  Loading
+@@ -32012,6 +32089,28 @@ static void readerShowLoading() { readerShowMessage(LV_SYMBOL_REFRESH "  Loading
  static void readerRenderBody() {
    if (!s_reader_scroll) return;
    lv_obj_clean(s_reader_scroll);
@@ -252,7 +299,7 @@ index 44cc3fc..d2a178e 100644
    lv_obj_set_flex_flow(s_reader_scroll, LV_FLEX_FLOW_COLUMN);
    lv_obj_set_flex_align(s_reader_scroll, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
    lv_obj_set_style_pad_row(s_reader_scroll, 2, LV_PART_MAIN);
-@@ -56926,6 +56998,31 @@ static unsigned long s_hw_last_space_ms = 0;
+@@ -56926,6 +57025,31 @@ static unsigned long s_hw_last_space_ms = 0;
  // Route a physical-keyboard character into the textarea currently being edited
  // — the on-screen keyboard's target, which is the chat composer directly or the
  // settings mirror textarea. No field open -> the key is ignored.
@@ -284,7 +331,7 @@ index 44cc3fc..d2a178e 100644
  static void handleHwKey(int key) {
    if (key != ' ') s_hw_last_space_ms = 0;
    if (!g_lv.keyboard) return;
-@@ -57120,6 +57217,33 @@ if (g_lv.task && g_lv.task->isManualLock()) {
+@@ -57120,6 +57244,33 @@ if (g_lv.task && g_lv.task->isManualLock()) {
      if (g_lv.keyboard) lv_keyboard_set_textarea(g_lv.keyboard, nullptr);
      ta_focused = nullptr;
    }
@@ -318,7 +365,7 @@ index 44cc3fc..d2a178e 100644
  #if CAP_KEYPAD_NAV && !defined(TLORA_PAGER)
    // Edit mode (keyboard-nav ON only): a focused field becomes the typing target after
    // select/Enter (below) — until then `ta` is null so the nav keys navigate. With
-@@ -57460,6 +57584,11 @@ if (g_lv.task && g_lv.task->isManualLock()) {
+@@ -57460,6 +57611,11 @@ if (g_lv.task && g_lv.task->isManualLock()) {
      }
      accentBoxHide();
    } else if (key == ' ') {
@@ -330,7 +377,7 @@ index 44cc3fc..d2a178e 100644
      // Double-tap SPACE within kDoubleSpaceMs toggles between English and
      // the configured secondary keyboard. If no secondary is set, it behaves
      // as a normal space. The limit is 250 ms, except on the M9: its same-key
-@@ -57488,6 +57617,7 @@ if (g_lv.task && g_lv.task->isManualLock()) {
+@@ -57488,6 +57644,7 @@ if (g_lv.task && g_lv.task->isManualLock()) {
        lv_textarea_add_char(ta, ' ');
      }
    } else if (key == 0x0D) {                   // regular ENTER (CR)
@@ -338,7 +385,7 @@ index 44cc3fc..d2a178e 100644
      // Enter is a non-typing action (send / newline / submit) — always tear down the
      // accent + @-mention popups. The Enter-to-send path keeps the keyboard up "for the
      // next message", so without this the accent box for the last letter lingers over
-@@ -61975,6 +62105,24 @@ enum AppDrawerAction {
+@@ -61975,6 +62132,24 @@ enum AppDrawerAction {
    APPACT_TERMINAL, APPACT_FILES, APPACT_FILE_TRANSFER, APPACT_SPECTRUM, APPACT_SNAKE, APPACT_VNC, APPACT_REMOTE, APPACT_READER,
    APPACT_DISCOVER, APPACT_STORE,
    APPACT_USB_FILES,
@@ -363,7 +410,7 @@ index 44cc3fc..d2a178e 100644
    APPACT_LUA_BASE = 100,   // APPACT_LUA_BASE + i = installed Lua app s_lua_inst[i]
  };
  // The drawer's built-in tiles, which are also what an App widget on Home can open.
-@@ -62017,6 +62165,24 @@ static const AppTileDef k_app_tiles[] = {
+@@ -62017,6 +62192,24 @@ static const AppTileDef k_app_tiles[] = {
    { UI_ICON_GAMEPAD_2,          "Snake",     APPACT_SNAKE,     HUE_MSG },     // native snake (Lua boards install it from the Store)
  #else
    { UI_ICON_STORE,              "Store",     APPACT_STORE,     HUE_MSG },     // Lua app store
@@ -388,7 +435,7 @@ index 44cc3fc..d2a178e 100644
  #endif
    { UI_ICON_HOUSE,              "Home",      APPACT_CMDCENTER, HUE_SYS },     // back to the Home widgets
    { UI_ICON_POWER,              "Power",     APPACT_POWER,     kAppHueDanger },
-@@ -62401,6 +62567,24 @@ static void appLaunch(int act, lv_event_t* e) {
+@@ -62401,6 +62594,24 @@ static void appLaunch(int act, lv_event_t* e) {
  #else
      case APPACT_SNAKE:     SnakeGame::launch();  return;
  #endif
@@ -413,7 +460,7 @@ index 44cc3fc..d2a178e 100644
  #if defined(HAS_TOUCH_UI)
      case APPACT_TERMINAL:  homeTerminalCb(e);    return;
  #endif
-@@ -89760,3 +89944,17 @@ static void docAuditFocus() {
+@@ -89760,3 +89971,17 @@ static void docAuditFocus() {
  }
  #endif
  #endif  // DOC_CAPTURE
