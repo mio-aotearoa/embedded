@@ -128,11 +128,25 @@ pure C++ with no LVGL/Arduino dependencies and is checked on the host
 Because it is a literal kana converter, `konnichiwa` gives こんにちわ — the は
 spelling needs a dictionary, which is the second half:
 
-Kana -> kanji conversion (にほん -> 日本) needs a dictionary plus a lattice/Viterbi
-search; anthy and mozc are not portable to this board, and there is no ESP32
-kanji-conversion implementation in the survey. So the Japanese page would offer
-kana input only. It shares the same two blockers as pinyin before anything can
-be typed: an LVGL 8.3 candidate UI and CJK glyphs.
+Kana -> kanji conversion (にほん -> 日本) is the part still missing. Three
+existing ESP32-capable projects do it, and they differ mainly in dictionary:
+
+| Project | Japanese input | Dictionary | ESP32 support |
+|---|---|---|---|
+| M5OpurSan | Romaji → Kana → Kanji | 927,000 words, 33 MB | ESP32-S3, tested on Cardputer ADV |
+| ESP32 Text Editor | SKK-style conversion | SKK-JISYO.S in SPIFFS | ESP32 / M5Stack |
+| Jaime | Romaji → Kana → Kanji | IPADIC | Zig, requires ESP32 port |
+
+For this board the SKK route is the one that fits: SKK-JISYO.S is a **text**
+dictionary (`よみ /候補/候補/`), so it can live on the SD card and be streamed by a
+lookup that needs no 33 MB image and no Zig port; M5OpurSan's 927k-word binary
+dictionary is a better converter but its size is the whole app slot, and Jaime
+would need an ESP32 port first. The `Download` page can already fetch files to
+the card, so the SKK dictionary is a card asset like the pinyin one.
+
+Status: only stage 1 (romaji -> kana) is implemented here. Stage 2 (SKK lookup +
+candidates) is not, and it shares the same remaining blockers as pinyin: an
+LVGL 8.3 candidate UI and CJK glyphs.
 
 Rendering CJK does not give you a way to type it, so CJK input needs a small
 table IME:

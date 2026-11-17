@@ -1,5 +1,5 @@
 diff --git a/platformio.ini b/platformio.ini
-index 75e3d7e..db31a10 100644
+index 75e3d7e..3369d46 100644
 --- a/platformio.ini
 +++ b/platformio.ini
 @@ -537,7 +537,10 @@ platform = platformio/espressif32@6.11.0
@@ -14,7 +14,7 @@ index 75e3d7e..db31a10 100644
  extra_scripts = pre:scripts/build/pre_gen_baked.py, pre:scripts/inject_wifi_env.py, pre:scripts/build/fatfs_exfat.py, pre:scripts/build/patch_lvgl_anim_uaf.py, pre:scripts/build/patch_lvgl_scroll_uaf.py, pre:scripts/build/patch_lvgl_async_del.py, pre:scripts/build/patch_lvgl_arabic.py, pre:scripts/build/patch_meshcore_txt_timestamp.py, pre:scripts/build/perf_lvgl.py, merge-bin.py
  custom_lvgl_o2 = yes   ; LVGL at -O2 (scripts/build/perf_lvgl.py): ~5% less time a frame, ~39 KB flash
  custom_lvgl_iram = lv_draw_sw_blend.c, lv_draw_label.c   ; their hot loops in IRAM: ~8% less a frame, ~6 KB internal RAM
-@@ -669,6 +672,35 @@ build_flags =
+@@ -669,6 +672,39 @@ build_flags =
    -D CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=16384
    -D CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=4096
  
@@ -47,10 +47,14 @@ index 75e3d7e..db31a10 100644
 +  -D WADAMESH_LOCALSEND=1
 +  -D WADAMESH_USB_ONLY_UPDATES=1
 +  -I ../../firmware/tdeck-plus/localsend
++
++  ; --- Download: any http(s) URL straight to the card ---
++  -D WADAMESH_DOWNLOAD=1
++  -I ../../firmware/tdeck-plus/downloader
  build_src_filter =
    +<*.cpp>
    +<*.c>
-@@ -678,6 +710,13 @@ build_src_filter =
+@@ -678,6 +714,14 @@ build_src_filter =
    +<ui-touch/*.cpp>
    +<ui-touch/*.c>
    +<../variants/lilygo_tdeck/*.cpp>
@@ -59,16 +63,17 @@ index 75e3d7e..db31a10 100644
 +  +<../../../firmware/tdeck-plus/esp32ai/*.cpp>
 +  +<../../../firmware/tdeck-plus/periodic/*.cpp>
 +  +<../../../firmware/tdeck-plus/localsend/*.cpp>
++  +<../../../firmware/tdeck-plus/downloader/*.cpp>
 +  +<../../../third_party/zstd/lib/common/*.c>
 +  +<../../../third_party/zstd/lib/decompress/*.c>
  
  lib_deps =
    https://github.com/ALLFATHER-BV/meshcomod.git#core-v1.18.0
 diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
-index 44cc3fc..cecccaa 100644
+index 44cc3fc..d17f725 100644
 --- a/src/ui-touch/UITask.cpp
 +++ b/src/ui-touch/UITask.cpp
-@@ -154,6 +154,18 @@ static void* wadaMp3Scratch() { return s_wada_mp3_scratch; }
+@@ -154,6 +154,21 @@ static void* wadaMp3Scratch() { return s_wada_mp3_scratch; }
  #include <Utils.h>
  #include <LvglPsramAlloc.h>   // PSRAM-preferred alloc helpers for the map tile cache
  #include "SnakeGame.h"        // Apps → Snake (self-contained game module)
@@ -84,10 +89,13 @@ index 44cc3fc..cecccaa 100644
 +#if WADAMESH_LOCALSEND
 +#include "localsend_app.h"     // Apps → LocalSend: send a card file to a LAN peer
 +#endif
++#if WADAMESH_DOWNLOAD
++#include "download_app.h"      // Apps → Download: any http(s) URL straight to the card
++#endif
  #include "LuaHost.h"          // Lua app host (LUA_APPS.md; Phase 0 spike gate)
  #include "LuaAppHost.h"       // sandboxed Lua apps (LUA_APPS.md Phase 1; self-gated on CAP_LUA_APPS)
  
-@@ -61975,6 +61987,18 @@ enum AppDrawerAction {
+@@ -61975,6 +61990,21 @@ enum AppDrawerAction {
    APPACT_TERMINAL, APPACT_FILES, APPACT_FILE_TRANSFER, APPACT_SPECTRUM, APPACT_SNAKE, APPACT_VNC, APPACT_REMOTE, APPACT_READER,
    APPACT_DISCOVER, APPACT_STORE,
    APPACT_USB_FILES,
@@ -103,10 +111,13 @@ index 44cc3fc..cecccaa 100644
 +#if WADAMESH_LOCALSEND
 +  APPACT_LOCALSEND,
 +#endif
++#if WADAMESH_DOWNLOAD
++  APPACT_DOWNLOAD,
++#endif
    APPACT_LUA_BASE = 100,   // APPACT_LUA_BASE + i = installed Lua app s_lua_inst[i]
  };
  // The drawer's built-in tiles, which are also what an App widget on Home can open.
-@@ -62017,6 +62041,18 @@ static const AppTileDef k_app_tiles[] = {
+@@ -62017,6 +62047,21 @@ static const AppTileDef k_app_tiles[] = {
    { UI_ICON_GAMEPAD_2,          "Snake",     APPACT_SNAKE,     HUE_MSG },     // native snake (Lua boards install it from the Store)
  #else
    { UI_ICON_STORE,              "Store",     APPACT_STORE,     HUE_MSG },     // Lua app store
@@ -122,10 +133,13 @@ index 44cc3fc..cecccaa 100644
 +#endif
 +#if WADAMESH_LOCALSEND
 +  { UI_ICON_SHARE_2,            "LocalSend",  APPACT_LOCALSEND, HUE_SYS },     // send a card file to a LAN peer
++#endif
++#if WADAMESH_DOWNLOAD
++  { UI_ICON_LINK,               "Download",   APPACT_DOWNLOAD,  HUE_SYS },     // any http(s) URL to the card
  #endif
    { UI_ICON_HOUSE,              "Home",      APPACT_CMDCENTER, HUE_SYS },     // back to the Home widgets
    { UI_ICON_POWER,              "Power",     APPACT_POWER,     kAppHueDanger },
-@@ -62401,6 +62437,18 @@ static void appLaunch(int act, lv_event_t* e) {
+@@ -62401,6 +62446,21 @@ static void appLaunch(int act, lv_event_t* e) {
  #else
      case APPACT_SNAKE:     SnakeGame::launch();  return;
  #endif
@@ -141,10 +155,13 @@ index 44cc3fc..cecccaa 100644
 +#if WADAMESH_LOCALSEND
 +    case APPACT_LOCALSEND: LocalSendApp::launch(); return; // send a card file to a LAN peer
 +#endif
++#if WADAMESH_DOWNLOAD
++    case APPACT_DOWNLOAD:  DownloadApp::launch();  return; // any http(s) URL to the card
++#endif
  #if defined(HAS_TOUCH_UI)
      case APPACT_TERMINAL:  homeTerminalCb(e);    return;
  #endif
-@@ -89760,3 +89808,17 @@ static void docAuditFocus() {
+@@ -89760,3 +89820,17 @@ static void docAuditFocus() {
  }
  #endif
  #endif  // DOC_CAPTURE

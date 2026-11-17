@@ -95,6 +95,22 @@ the firmware's mount policy or open-file budget.
 * wadamesh's Reader is the reuse that fits: same panel, same fonts, same
   keyboard/trackball policy, already shipping.
 
+### On-device downloader
+
+`firmware/tdeck-plus/downloader/` is a page, not a second transport: it fills in
+the URL and destination for the same `common/http_download.cpp` worker Kiwix and
+ESP-AI use (HTTPClient GET, redirects followed, TLS `setInsecure()`, one
+transfer at a time, `<dest>.part` renamed only after the last byte). It accepts
+`http://` and `https://` URLs, derives a safe filename from the URL, writes to
+`/sd/downloads/` (presets write to `/sd/ime/`), shows percentage when the server
+sends a length, can cancel, and cleans up on page teardown.
+
+Presets point at the pinyin engine's source word lists on GitHub, pinned to the
+submodule commit. Those are the inputs to `scripts/pinyin-dict.sh`; the binary
+dictionary itself is still built on a host, so downloading the lists is a
+convenience (a device with only a card can hold the data), not a way to produce
+`dict_pinyin.dat` on the S3 yet.
+
 ### LocalSend — a send-only client written here, no code copied
 
 The official LocalSend app is Flutter; the other implementations are Rust, Go

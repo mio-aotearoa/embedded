@@ -65,6 +65,10 @@ The `Elements` page is the periodic table from
 the grid drawing is new code. Tap a cell for mass, category, electronegativity
 and electron configuration.
 
+The `Download` page fetches any `http://` or `https://` URL straight to the card
+(`/sd/downloads/`, or `/sd/ime/` for the pinyin word-list presets), using the
+same downloader task as Kiwix/ESP-AI, with progress and cancel.
+
 The `LocalSend` page sends a file from the card to a LocalSend peer on the LAN.
 No upstream client code is used (the official app is Flutter and the other
 implementations are Rust/Go/Win32), so this is our own protocol v2 client: peer
