@@ -12,3 +12,4 @@ result-*
 
 # ESP-IDF / PlatformIO build trees
 build/
+third_party/out/
