@@ -2,8 +2,9 @@
 
 What is actually available for this board, what each candidate would cost to
 bring in, and which one is worth attempting. This is a survey plus a
-recommendation, not an integration: nothing here is compiled into the firmware
-yet.
+recommendation. The winner (TactileBrowser's `tactilebrowser_core`) is now
+compiled in, and the firmware's own **Web** page renders fetched pages with it;
+the survey below is kept as the reasoning behind that choice.
 
 ## What the firmware has today
 
@@ -14,7 +15,9 @@ navigation and back bar (`openReaderPage()` in `UITask.cpp`). Kiwix articles are
 handed to that same page. It has no CSS layout, images, forms or JavaScript, and
 its HTTPS path uses `setInsecure()` with no certificate store.
 
-**Can the Reader do CSS or JS? No, by construction.** `ReaderContent::htmlToText`
+**Can the Reader do CSS or JS? Its text pass cannot — since the merge that pass
+is only the fallback.** Fetched pages go to our Lexbor renderer first; one it
+cannot lay out falls back to `ReaderContent::htmlToText`
 (`src/ui-touch/ReaderContent.cpp`) runs one tag-stripping pass: it skips the body
 of every `<script>` and `<style>` element, drops all other tags, decodes
 entities, and keeps block/line boundaries plus `<a href>` targets. Nothing

@@ -81,9 +81,10 @@ layer (`firmware/tdeck-plus/browser/`): an LVGL 8.3 renderer and a fetcher.
 There is no second web page — the drawer has one **Web** tile, wadamesh's own
 Reader page, and it lays fetched markup out with this renderer (the core's CSS
 subset, inline scripts on Duktape 2.7.0) while keeping its text view as the
-fallback for pages the layout engine cannot handle. Lexbor's legacy encoding tables are `const` through
+fallback for pages the layout engine cannot handle.
+Lexbor's legacy encoding tables are `const` through
 `patches/TactileBrowser/`, so ~760 KB of tables live in flash instead of DRAM:
-the image uses **6,193,857 of 8,126,464 bytes of flash (76.2%)** and **158,168 of
+the image uses **6,193,849 of 8,126,464 bytes of flash (76.2%)** and **158,168 of
 327,680 bytes of RAM (48.3%)**. See
 [`docs/architecture.md`](docs/architecture.md) for the measured before/after.
 

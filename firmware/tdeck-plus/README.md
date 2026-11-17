@@ -99,6 +99,6 @@ applied automatically; `./scripts/patches.sh status wadamesh` shows it.
 * Articles larger than 220 KB are refused rather than truncated.
 * One archive is open at a time; the working file is
   `/meshcomod/kiwix/article.htm` on the card.
-* Compiled but not flashed: `nix run .#firmware` links the image (3,859,664 B);
-  nothing has run on hardware yet. See `docs/architecture.md` for the exact
-  checks.
+* The image is flashed over USB (`firmware/tdeck-plus/build.sh -t upload`,
+  or `nix run .#firmware -- -t upload`); it links at 6,193,849 B (76.2 % of
+  the app slot). See `docs/architecture.md` for the measured figures.
