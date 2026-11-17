@@ -10,7 +10,7 @@
 
 #include "AppPage.h"
 #include "i18n.h"
-#include "periodic_data.h"
+#include "ChemDatabase.h"  // third_party/neocalculator (pinned submodule), GPL-3.0-or-later
 
 #include <lvgl.h>
 
@@ -48,7 +48,7 @@ constexpr const char *kCategoryNames[] = {
     "Unknown",
 };
 
-uint32_t categoryColor(periodic::Category category)
+uint32_t categoryColor(chem::ChemCategory category)
 {
     const int i = (int)category;
     if (i < 0 || i >= (int)(sizeof kCategoryColors / sizeof kCategoryColors[0]))
@@ -58,7 +58,7 @@ uint32_t categoryColor(periodic::Category category)
     return kCategoryColors[i];
 }
 
-const char *categoryName(periodic::Category category)
+const char *categoryName(chem::ChemCategory category)
 {
     const int i = (int)category;
     if (i < 0 || i >= (int)(sizeof kCategoryNames / sizeof kCategoryNames[0]))
@@ -151,20 +151,20 @@ void PeriodicApp::select(int z)
 void PeriodicApp::updateDetail(void)
 {
     if (!detail_) return;
-    const periodic::Element &el = periodic::kElements[selected_ - 1];
+    const chem::ElementData &el = chem::ELEMENTS[selected_ - 1];
     char first[96];
     char second[128];
     snprintf(first, sizeof first, "#%u  %s  %s \xE2\x80\x94 %.3f g/mol",
-             (unsigned)el.z, el.symbol, el.name, (double)el.mass);
+                 (unsigned)el.atomicNumber, el.symbol, el.name, (double)el.mass);
     if (el.electronegativity > 0.0f)
     {
         snprintf(second, sizeof second, "%s \xC2\xB7 EN %.2f \xC2\xB7 %s",
-                 categoryName(el.category), (double)el.electronegativity, el.config);
+                 categoryName(el.category), (double)el.electronegativity, el.electronConfig);
     }
     else
     {
         snprintf(second, sizeof second, "%s \xC2\xB7 EN n/a \xC2\xB7 %s",
-                 categoryName(el.category), el.config);
+                 categoryName(el.category), el.electronConfig);
     }
     char text[256];
     snprintf(text, sizeof text, "%s\n%s", first, second);
@@ -192,7 +192,7 @@ void PeriodicApp::drawCb(lv_event_t *e)
     {
         for (int col = 0; col < kCols; col++)
         {
-            const int z = periodic::kLayout[row][col];
+            const int z = chem::TABLE_LAYOUT[row][col];
             if (z < 1) continue;
 
             lv_area_t cell = {ox + col * kCellW, oy + row * kCellH,
@@ -204,7 +204,7 @@ void PeriodicApp::drawCb(lv_event_t *e)
                 continue;
             }
 
-            const periodic::Element &el = periodic::kElements[z - 1];
+            const chem::ElementData &el = chem::ELEMENTS[z - 1];
             const bool chosen = (z == app->selected_);
 
             lv_draw_rect_dsc_t rect;
@@ -248,6 +248,6 @@ void PeriodicApp::pressedCb(lv_event_t *e)
     const int row = y / kCellH;
     if (col >= kCols || row >= kRows) return;
 
-    const int z = periodic::kLayout[row][col];
+    const int z = chem::TABLE_LAYOUT[row][col];
     if (z >= 1) s_active->select(z);
 }

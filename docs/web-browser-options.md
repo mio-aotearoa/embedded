@@ -66,16 +66,20 @@ browser build, same 16 MB flash, same tiles/spiffs offsets:
 | Layout | App slot | OTA | Map tiles | User data |
 |---|---|---|---|---|
 | today (`partitions_tdeck_touch.csv`) | 3.875 MB ×2 | yes | 4.75 MB | kept |
-| **single app** (`partitions_tdeck_browser.csv`) | **7.75 MB** (0x7C0000) | no | 4.75 MB | kept |
+| **single app** (`partitions_tdeck_browser.csv`) | **7.75 MB** (0x7C0000) | no (USB only) | 4.75 MB | kept |
 | single app, no tiles | 12.5 MB (0xC80000) | no | lost | kept |
 | two 5 MB slots | 5 MB ×2 | yes | ~2.5 MB | moved (wiped) |
 
 The first option is the one worth taking: it doubles the app budget without
 touching `tiles` (0x7D0000) or `spiffs` (0xC90000), so a USB re-flash keeps the
-tile cache and every stored preference/contact/channel. The cost is OTA — the
-`otadata` partition stays but there is no second slot, so updates are USB-only.
-Dropping the tile cache buys another 4.75 MB but loses offline maps, and moving
-SPIFFS to fit two larger slots wipes user data on the first flash.
+tile cache and every stored preference/contact/channel. The cost is OTA: the
+`otadata` partition is gone and `app0` is a `factory` app, so updates are
+USB-only (`CAP_OTA` is 0 in this build, which compiles the on-device update UI
+out). Removing otadata does not grow the app by itself — app partitions start on
+a 64 KB boundary, and 0x10000 is the first after the partition table — so its
+8 KB went to NVS (20 KB → 28 KB). Dropping the tile cache buys another 4.75 MB
+but loses offline maps, and moving SPIFFS to fit two larger slots wipes user
+data on the first flash.
 
 Changing the table is not the same as fitting a browser: 7.75 MB of flash still
 leaves the S3's 512 KB SRAM and PSRAM bandwidth as the binding constraint for a

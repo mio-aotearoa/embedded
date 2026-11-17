@@ -59,15 +59,26 @@ runtime port.
 
 The `Elements` page is the periodic table from
 [El-EnderJ/NeoCalculator](https://github.com/El-EnderJ/NeoCalculator)
-(GPL-3.0-or-later): its element data and 18×10 layout, redrawn as one LVGL grid
-for this firmware's LVGL 8.3 rather than their LVGL 9 app. Tap a cell for mass,
-category, electronegativity and electron configuration.
+(GPL-3.0-or-later). Their LVGL 9 app is not ported; instead
+`third_party/neocalculator` is a pinned submodule and the page includes its
+`ChemDatabase.h`, so the element data and 18×10 layout stay upstream while only
+the grid drawing is new code. Tap a cell for mass, category, electronegativity
+and electron configuration.
+
+The `LocalSend` page sends a file from the card to a LocalSend peer on the LAN.
+No upstream client code is used (the official app is Flutter and the other
+implementations are Rust/Go/Win32), so this is our own protocol v2 client: peer
+discovery, `prepare-upload`, a streamed `upload`, and `cancel` on failure. It
+sends over plain HTTP and does not receive.
 
 Browser-engine options (TactileBrowser, eBrowser, Agave) are compared in
 [`docs/web-browser-options.md`](docs/web-browser-options.md), which also covers
 what the Reader can do (no CSS, no JavaScript) and
 `firmware/tdeck-plus/partitions_tdeck_browser.csv` — a 7.75 MB single-app
-partition table that keeps the map tiles and user data, at the cost of OTA.
+partition table with no OTA slot (updates over USB), keeping the map tiles and
+user data. librime is not included: it needs Boost/leveldb/marisa/OpenCC and has
+no ESP32 port, so there is no CJK input method; the CJK font options (flash or
+SD card) are in [`docs/cjk-rendering.md`](docs/cjk-rendering.md).
 
 **reTerminal E1002** — esp32-photoframe owns boot, storage, image pipeline and
 deep sleep. An ESP-IDF component (`components/airdrop_bridge`) compiles

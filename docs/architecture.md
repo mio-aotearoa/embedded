@@ -95,18 +95,35 @@ the firmware's mount policy or open-file budget.
 * wadamesh's Reader is the reuse that fits: same panel, same fonts, same
   keyboard/trackball policy, already shipping.
 
-### Periodic table (`El-EnderJ/NeoCalculator`) — data ported, UI rebuilt
+### LocalSend — a send-only client written here, no code copied
+
+The official LocalSend app is Flutter; the other implementations are Rust, Go
+and Win32, and none targets ESP-IDF, so there is nothing to vendor and nothing
+to patch. `firmware/tdeck-plus/localsend/` is this repository's own code written
+from the protocol description (`localsend/protocol`, v2): it discovers peers
+(multicast announcement listener on 224.0.0.167:53317, then a /24 sweep of
+`GET /api/localsend/v2/info`), calls `prepare-upload`, then streams one SD file
+to `upload` and calls `cancel` on failure. JSON for those three small documents
+is built and read by hand, so no JSON library is added.
+
+What it deliberately does not do: receive files, speak HTTPS (a peer announcing
+`"protocol":"https"` is not listed rather than failing later), folders or
+multi-file batches. Transfer progress comes from an `lv_timer` polling the
+worker task, like the Kiwix/ESP-AI downloader, so the UI never blocks.
+
+### Periodic table (`El-EnderJ/NeoCalculator`) — data from the pinned submodule
 
 NeoCalculator's periodic table is an LVGL 9 app (`lv_obj_delete`,
 `lv_event_get_layer`, custom draw), and this firmware is pinned to 8.3.11, so
-the app is not lifted: its **data** is. `firmware/tdeck-plus/periodic/periodic_data.h`
-carries the 118 elements (number, symbol, name, mass, category,
-electronegativity, electron configuration) and the 18×10 `kLayout` from
-`src/apps/ChemDatabase.h`, under the same GPL-3.0-or-later licence, with the
-attribution in the header.
+the app is not lifted and, per this repository's rule, none of its source is
+copied. `third_party/neocalculator` is a pinned submodule and
+`periodic_app.cpp` includes its `src/apps/ChemDatabase.h` directly (it only
+needs `<cstdint>`, so it compiles unchanged): the 118 elements, the category
+enum and the 18×10 `TABLE_LAYOUT` all stay upstream, under their own
+GPL-3.0-or-later headers.
 
-`periodic_app.cpp` draws the grid in a single LVGL object instead of 118
-buttons: `LV_EVENT_DRAW_MAIN` paints each cell (category colour, selected cell
+`periodic_app.cpp` is the only new code: it draws the grid in a single LVGL
+object instead of 118 buttons, `LV_EVENT_DRAW_MAIN` paints each cell (category colour, selected cell
 outlined) and `LV_EVENT_PRESSED` converts the pointer position to a row/column
 and looks the element up in `kLayout`. The strip under the grid shows
 `#Z symbol name — mass` and `category · EN · configuration`. It uses the same
@@ -389,7 +406,9 @@ has been flashed or run on hardware. What was actually checked:
 
 * The T-Deck env compiles: `nix run .#firmware` finished in 92 s with
   `http_download.cpp`, `esp32ai_app.cpp`, `kiwix_app.cpp` and `zim_reader.cpp`
-  in the build, no compiler warnings from them, and 3,859,664 B of image (the
+  in the build, no compiler warnings from them, and 3,879,317 B of image in the 7.75 MB
+  `factory` slot (no OTA: USB updates only), with `PeriodicApp::launch`,
+  `LocalSendApp::launch` and the LocalSend task symbols present (the
   app partition is 3.875 MB). `nm` finds `KiwixApp::launch()`,
   `Esp32AiApp::launch()`, `ZimArchive::searchTitles()` and
   `httpDownloadStart()` in the ELF.

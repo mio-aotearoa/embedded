@@ -1,8 +1,20 @@
 diff --git a/platformio.ini b/platformio.ini
-index 75e3d7e..1f4b58c 100644
+index 75e3d7e..db31a10 100644
 --- a/platformio.ini
 +++ b/platformio.ini
-@@ -669,6 +669,29 @@ build_flags =
+@@ -537,7 +537,10 @@ platform = platformio/espressif32@6.11.0
+ framework = arduino
+ board = t-deck
+ monitor_speed = 115200
+-board_build.partitions = variants/lilygo_tdeck/partitions_tdeck_touch.csv
++; USB-only updates: one 7.75 MB app slot instead of two 3.875 MB OTA slots.
++; The tiles and spiffs offsets are unchanged, so a USB flash keeps the map
++; tile cache and every stored preference.
++board_build.partitions = ../../firmware/tdeck-plus/partitions_tdeck_browser.csv
+ extra_scripts = pre:scripts/build/pre_gen_baked.py, pre:scripts/inject_wifi_env.py, pre:scripts/build/fatfs_exfat.py, pre:scripts/build/patch_lvgl_anim_uaf.py, pre:scripts/build/patch_lvgl_scroll_uaf.py, pre:scripts/build/patch_lvgl_async_del.py, pre:scripts/build/patch_lvgl_arabic.py, pre:scripts/build/patch_meshcore_txt_timestamp.py, pre:scripts/build/perf_lvgl.py, merge-bin.py
+ custom_lvgl_o2 = yes   ; LVGL at -O2 (scripts/build/perf_lvgl.py): ~5% less time a frame, ~39 KB flash
+ custom_lvgl_iram = lv_draw_sw_blend.c, lv_draw_label.c   ; their hot loops in IRAM: ~8% less a frame, ~6 KB internal RAM
+@@ -669,6 +672,35 @@ build_flags =
    -D CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=16384
    -D CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=4096
  
@@ -29,10 +41,16 @@ index 75e3d7e..1f4b58c 100644
 +  ; --- periodic table: NeoCalculator's element data, drawn as one LVGL grid ---
 +  -D WADAMESH_PERIODIC=1
 +  -I ../../firmware/tdeck-plus/periodic
++  -I ../../third_party/neocalculator/src/apps
++
++  ; --- LocalSend: send a file from the card to a LocalSend peer over HTTP ---
++  -D WADAMESH_LOCALSEND=1
++  -D WADAMESH_USB_ONLY_UPDATES=1
++  -I ../../firmware/tdeck-plus/localsend
  build_src_filter =
    +<*.cpp>
    +<*.c>
-@@ -678,6 +701,12 @@ build_src_filter =
+@@ -678,6 +710,13 @@ build_src_filter =
    +<ui-touch/*.cpp>
    +<ui-touch/*.c>
    +<../variants/lilygo_tdeck/*.cpp>
@@ -40,16 +58,17 @@ index 75e3d7e..1f4b58c 100644
 +  +<../../../firmware/tdeck-plus/common/*.cpp>
 +  +<../../../firmware/tdeck-plus/esp32ai/*.cpp>
 +  +<../../../firmware/tdeck-plus/periodic/*.cpp>
++  +<../../../firmware/tdeck-plus/localsend/*.cpp>
 +  +<../../../third_party/zstd/lib/common/*.c>
 +  +<../../../third_party/zstd/lib/decompress/*.c>
  
  lib_deps =
    https://github.com/ALLFATHER-BV/meshcomod.git#core-v1.18.0
 diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
-index 44cc3fc..541bb28 100644
+index 44cc3fc..cecccaa 100644
 --- a/src/ui-touch/UITask.cpp
 +++ b/src/ui-touch/UITask.cpp
-@@ -154,6 +154,15 @@ static void* wadaMp3Scratch() { return s_wada_mp3_scratch; }
+@@ -154,6 +154,18 @@ static void* wadaMp3Scratch() { return s_wada_mp3_scratch; }
  #include <Utils.h>
  #include <LvglPsramAlloc.h>   // PSRAM-preferred alloc helpers for the map tile cache
  #include "SnakeGame.h"        // Apps → Snake (self-contained game module)
@@ -62,10 +81,13 @@ index 44cc3fc..541bb28 100644
 +#if WADAMESH_PERIODIC
 +#include "periodic_app.h"      // Apps → Periodic Table: 118 elements, LVGL-drawn grid
 +#endif
++#if WADAMESH_LOCALSEND
++#include "localsend_app.h"     // Apps → LocalSend: send a card file to a LAN peer
++#endif
  #include "LuaHost.h"          // Lua app host (LUA_APPS.md; Phase 0 spike gate)
  #include "LuaAppHost.h"       // sandboxed Lua apps (LUA_APPS.md Phase 1; self-gated on CAP_LUA_APPS)
  
-@@ -61975,6 +61984,15 @@ enum AppDrawerAction {
+@@ -61975,6 +61987,18 @@ enum AppDrawerAction {
    APPACT_TERMINAL, APPACT_FILES, APPACT_FILE_TRANSFER, APPACT_SPECTRUM, APPACT_SNAKE, APPACT_VNC, APPACT_REMOTE, APPACT_READER,
    APPACT_DISCOVER, APPACT_STORE,
    APPACT_USB_FILES,
@@ -78,10 +100,13 @@ index 44cc3fc..541bb28 100644
 +#if WADAMESH_PERIODIC
 +  APPACT_PERIODIC,
 +#endif
++#if WADAMESH_LOCALSEND
++  APPACT_LOCALSEND,
++#endif
    APPACT_LUA_BASE = 100,   // APPACT_LUA_BASE + i = installed Lua app s_lua_inst[i]
  };
  // The drawer's built-in tiles, which are also what an App widget on Home can open.
-@@ -62017,6 +62035,15 @@ static const AppTileDef k_app_tiles[] = {
+@@ -62017,6 +62041,18 @@ static const AppTileDef k_app_tiles[] = {
    { UI_ICON_GAMEPAD_2,          "Snake",     APPACT_SNAKE,     HUE_MSG },     // native snake (Lua boards install it from the Store)
  #else
    { UI_ICON_STORE,              "Store",     APPACT_STORE,     HUE_MSG },     // Lua app store
@@ -94,10 +119,13 @@ index 44cc3fc..541bb28 100644
 +#endif
 +#if WADAMESH_PERIODIC
 +  { UI_ICON_LAYOUT_GRID,        "Elements",  APPACT_PERIODIC,  HUE_SYS },     // periodic table, tap for details
++#endif
++#if WADAMESH_LOCALSEND
++  { UI_ICON_SHARE_2,            "LocalSend",  APPACT_LOCALSEND, HUE_SYS },     // send a card file to a LAN peer
  #endif
    { UI_ICON_HOUSE,              "Home",      APPACT_CMDCENTER, HUE_SYS },     // back to the Home widgets
    { UI_ICON_POWER,              "Power",     APPACT_POWER,     kAppHueDanger },
-@@ -62401,6 +62428,15 @@ static void appLaunch(int act, lv_event_t* e) {
+@@ -62401,6 +62437,18 @@ static void appLaunch(int act, lv_event_t* e) {
  #else
      case APPACT_SNAKE:     SnakeGame::launch();  return;
  #endif
@@ -110,10 +138,13 @@ index 44cc3fc..541bb28 100644
 +#if WADAMESH_PERIODIC
 +    case APPACT_PERIODIC:  PeriodicApp::launch(); return;  // 118 elements, tap for details
 +#endif
++#if WADAMESH_LOCALSEND
++    case APPACT_LOCALSEND: LocalSendApp::launch(); return; // send a card file to a LAN peer
++#endif
  #if defined(HAS_TOUCH_UI)
      case APPACT_TERMINAL:  homeTerminalCb(e);    return;
  #endif
-@@ -89760,3 +89796,17 @@ static void docAuditFocus() {
+@@ -89760,3 +89808,17 @@ static void docAuditFocus() {
  }
  #endif
  #endif  // DOC_CAPTURE
@@ -131,3 +162,21 @@ index 44cc3fc..541bb28 100644
 +extern "C" void wadameshOpenReaderUrl(const char* url) { openReaderPage(url); }
 +#endif
 +#endif
+diff --git a/src/ui-touch/device_caps.h b/src/ui-touch/device_caps.h
+index 5ebc912..6db5d0b 100644
+--- a/src/ui-touch/device_caps.h
++++ b/src/ui-touch/device_caps.h
+@@ -183,7 +183,13 @@
+   #define CAP_SD           1
+   #define CAP_FILESYSTEM   1
+   #define CAP_GPS          1   // CC1167Q on UART
++  #if WADAMESH_USB_ONLY_UPDATES
++  // This build's partition table has ONE 7.75 MB app slot, so there is no
++  // second slot to write an OTA image into: updates are USB only.
++  #define CAP_OTA          0
++  #else
+   #define CAP_OTA          1   // 16 MB flash, dual A/B app slots (see partitions_tdeck_touch.csv)
++  #endif
+   #define CAP_LOCK_SCREEN  1
+ 
+ #elif defined(HAS_RAK_TAP_V2)         // ===== RAK WisMesh Tap V2 (ESP32-S3) =====
