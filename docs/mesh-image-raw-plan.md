@@ -35,3 +35,36 @@ writer can be developed and host-tested here independently of that hook.
 
 No code is added for this yet: the parser needs the exact `GRP_DATA` receive
 API of the pinned core, and inventing one blind would not compile.
+
+## What the T-Deck can actually draw
+
+The chunk header and the single metadata byte are enough to draw a card that
+tracks the real image, even though the pixels cannot be decoded:
+
+```
+chunk 0 body[0] = aspect(4 bits) | resolution(2 bits) | rate(2 bits)
+header          = sender_prefix(2) | img_id(1) | idx<<4 | total(1)
+```
+
+* **shape**: the 4-bit aspect code maps to the source photo's aspect ratio
+  (the exact table is `kImageAspectCodes` in meshcore-open's
+  `image_chunk_transport.dart`). Draw the card at that ratio, not a square.
+* **size/quality label**: the resolution and rate codes name the codec point
+  (`ft32` / `ft16`, 512x512 reconstruction), so the card can say what the
+  sender used.
+* **progress**: `idx`/`total` plus the presence of the parity chunk
+  (`idx == total`) give "7/9 chunks + parity", bytes received, and whether the
+  stream is complete or missing a chunk.
+* **identity**: `sender_prefix + img_id` makes a stable per-image key for the
+  SD file and the thumbnail seed.
+
+A deterministic 12x12 mosaic drawn from the payload itself gives every image a
+distinct, stable visual fingerprint: block (x,y) samples byte
+`((y*12+x) * payload_len / 144)` and maps it to one of a few grey levels. The
+same encoded bytes always produce the same pattern; two different photos look
+different; a partially received stream visibly fills in as chunks arrive. It is
+labelled "encoded preview - decode on phone", never presented as the photo.
+
+Layout: aspect-correct card + mosaic + progress row + state line, plus an
+optional hex sheet for the first 64 bytes. That is representative (shape,
+quality, completeness, identity), honest, and costs no codec, model or RAM.
