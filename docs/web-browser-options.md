@@ -38,7 +38,7 @@ new flash.
   has to move.
 * **Flash:** this build now uses `firmware/tdeck-plus/partitions_tdeck_browser.csv`:
   one 7.75 MB `factory` app slot (0x7C0000), no OTA. The image with Kiwix,
-  ESP-AI, LocalSend, the periodic table and the web renderer is **7,134,249 B** —
+  ESP-AI, LocalSend, the periodic table and the web renderer is **7,134,897 B** —
   **87.8 %** of the slot, about **0.95 MB free**. The table below shows the alternatives, and
   why the old 3.875 MB figure is gone.
 * **RAM:** 512 KB internal SRAM + 8 MB PSRAM. The S3 has no MMU, and QuickJS or
@@ -103,7 +103,7 @@ It is in the shipping image. The blocker was Lexbor's legacy encoding tables
 (~760 KB of writable initialized data, 613,584 B of DRAM overflow); making every
 table in `encoding/multi.c` `const` through `patches/TactileBrowser/` moves them
 to flash. The T-Deck image uses **149,640 / 327,680 B of RAM (45.7%)** and
-**7,134,249 / 8,126,464 B of flash (87.8%)**.
+**7,134,897 / 8,126,464 B of flash (87.8%)**.
 
 A page gets: URL entry, fetch (redirects followed, TLS `setInsecure()`), HTML
 parsing, the core's CSS subset (tag/class/id selectors, box model, colours,
@@ -191,7 +191,7 @@ DOM milestone the current page still lacks.
 
 The engine survey was read from each project's README, site and source layout on
 2026-11-17. Only TactileBrowser was built: its core is linked in, and the image
-measures **7,134,277 B of 8,126,464** (87.8% of the 7.75 MB slot) with
+measures **7,134,897 B of 8,126,464** (87.8% of the 7.75 MB slot) with
 **149,640 B of RAM**. The JS layer and the ZIM parser have host tests, and
 `nix run .#firmware` builds the device image. eBrowser, Agave and babe32 were not
 built, so their figures remain claims. The shipped page has not yet been

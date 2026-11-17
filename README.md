@@ -84,7 +84,7 @@ subset, inline scripts on Duktape 2.7.0) while keeping its text view as the
 fallback for pages the layout engine cannot handle.
 Lexbor's legacy encoding tables are `const` through
 `patches/TactileBrowser/`, so ~760 KB of tables live in flash instead of DRAM:
-the image uses **7,134,249 of 8,126,464 bytes of flash (87.8%)** and **149,640 of
+the image uses **7,134,897 of 8,126,464 bytes of flash (87.8%)** and **149,640 of
 327,680 bytes of RAM (45.7%)**. See
 [`docs/architecture.md`](docs/architecture.md) for the measured before/after.
 
