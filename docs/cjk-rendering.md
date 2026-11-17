@@ -117,6 +117,23 @@ Still missing for a working IME: an LVGL 8.3 candidate/keyboard UI, and CJK
 glyphs to draw the candidates with (next section). Until both exist there is no
 CJK input in this firmware, and no code here pretends otherwise.
 
+### Japanese (romaji)
+
+`firmware/tdeck-plus/ime/romaji_kana.cpp` is the input half for Japanese: it
+converts romaji to hiragana or katakana with a longest-match syllable table,
+sokuon for a doubled consonant (`gakkou` -> がっこう), syllabic n (`nihon` ->
+にほん, `onna` -> おんな, `ann` -> あん, `n'ya` -> んや), and `-` -> ー. It is
+pure C++ with no LVGL/Arduino dependencies and is checked on the host
+(`konnichiwa` -> こんにちわ, `kya` -> キャ, dangling `k` reported incomplete).
+Because it is a literal kana converter, `konnichiwa` gives こんにちわ — the は
+spelling needs a dictionary, which is the second half:
+
+Kana -> kanji conversion (にほん -> 日本) needs a dictionary plus a lattice/Viterbi
+search; anthy and mozc are not portable to this board, and there is no ESP32
+kanji-conversion implementation in the survey. So the Japanese page would offer
+kana input only. It shares the same two blockers as pinyin before anything can
+be typed: an LVGL 8.3 candidate UI and CJK glyphs.
+
 Rendering CJK does not give you a way to type it, so CJK input needs a small
 table IME:
 
