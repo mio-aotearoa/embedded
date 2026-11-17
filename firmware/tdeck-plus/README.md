@@ -8,7 +8,7 @@ model assets on the card. Both can fetch their data over Wi-Fi.
 
 Upstream is not forked or copied. `third_party/wadamesh` is a pinned submodule;
 the apps live here and are compiled into wadamesh's own T-Deck PlatformIO
-environment by a single patch (`patches/wadamesh/0001-kiwix-and-esp32ai-apps.patch`).
+environment by a single patch (`patches/wadamesh/0001-kiwix-esp32ai-periodic-apps.patch`).
 
 ## Layout
 
@@ -24,7 +24,7 @@ firmware/tdeck-plus/
     http_download.{h,cpp}  one HTTP(S) -> SD transfer, on its own task
   test/host/            host test for the parser (no ESP32 needed)
 patches/wadamesh/
-  0001-kiwix-and-esp32ai-apps.patch  build wiring + drawer tiles + Reader bridge
+  0001-kiwix-esp32ai-periodic-apps.patch  build wiring + drawer tiles + Reader bridge
 ```
 
 ## How the pieces fit
@@ -45,10 +45,11 @@ wadamesh Reader (openReaderPage)  <- existing firmware screen
 SD card
 ```
 
-The Reader is wadamesh's own on-device browser; it already opens local HTML
-from the card (`sd:/...`). So there is no second HTML renderer here: the app
-writes the article out and the firmware displays it exactly like any other
-local page. ZIM-internal links are turned into plain text because the Reader
+The Reader is wadamesh's own on-device browser — the drawer's only **Web**
+tile. It opens local HTML from the card (`sd:/...`) and fetched pages, and the
+latter are laid out by our Lexbor renderer (`firmware/tdeck-plus/browser/`), so
+there is still only one web app. The app writes the article out and the firmware
+displays it exactly like any other local page. ZIM-internal links are turned into plain text because the Reader
 would resolve them against the card and miss; following links inside an
 archive is not implemented.
 
@@ -89,8 +90,9 @@ applied automatically; `./scripts/patches.sh status wadamesh` shows it.
 
 ## Limitations
 
-* Text/HTML articles only. Images, CSS and tables are dropped by the Reader's
-  text pass; full-text (Xapian) search is not used — search is the ZIM title
+* Text/HTML articles only. A ZIM article is opened from the card, so it gets the
+  Reader's text pass, which drops images, CSS and tables (fetched `http(s)` pages
+  go through the Lexbor renderer instead); full-text (Xapian) search is not used — search is the ZIM title
   index, so it matches title prefixes only.
 * LZMA2/XZ clusters (pre-libzim-8 archives) are rejected with a message; those
   archives need re-exporting with zstd.

@@ -142,7 +142,7 @@ index 484c510..b05aad5 100644
   * Create a page root: full width, from just under the status bar to the bottom of the
   * screen, on lv_layer_top, opaque `bg_color`, non-scrollable and CLICKABLE so no press
 diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
-index 44cc3fc..390b574 100644
+index 44cc3fc..6b5e074 100644
 --- a/src/ui-touch/UITask.cpp
 +++ b/src/ui-touch/UITask.cpp
 @@ -154,6 +154,24 @@ static void* wadaMp3Scratch() { return s_wada_mp3_scratch; }
@@ -203,7 +203,17 @@ index 44cc3fc..390b574 100644
  static lv_obj_t*     s_reader_go     = nullptr;
  static lv_obj_t*     s_reader_editbtn= nullptr;    // floating "edit URL" button (shown while reading)
  static lv_obj_t*     s_reader_scroll = nullptr;    // flex-column body container (holds text + link labels)
-@@ -31804,13 +31841,40 @@ static void readerFetchTaskFn(void*) {
+@@ -31780,6 +31817,9 @@ static ReaderLocalResult readerReadLocal(const char* url, uint8_t* raw, size_t c
+ 
+ // Worker (core 0): load s_reader_url, strip to s_reader_text, publish via s_reader_dirty.
+ static void readerFetchTaskFn(void*) {
++#if defined(WADAMESH_BROWSER)
++  s_reader_html_len = 0;   // new load: never render the previous page's markup
++#endif
+   const uint32_t generation = s_reader_task_generation;
+   char url[300]; strncpy(url, s_reader_url, sizeof url - 1); url[sizeof url - 1] = 0;
+   bool result_ok = false;
+@@ -31804,13 +31844,40 @@ static void readerFetchTaskFn(void*) {
                                       text_mode ? &txt_size : nullptr, text_mode ? &txt_at : nullptr);
        source_ok = local_result == ReaderLocalResult::Ok;
      } else {
@@ -250,7 +260,7 @@ index 44cc3fc..390b574 100644
        if (code == HTTP_CODE_OK) {
          ReaderBufferStream sink(raw, rawcap - 1, generation);
          const int transfer_result = httpc.writeToStream(&sink);
-@@ -31862,6 +31926,19 @@ static void readerFetchTaskFn(void*) {
+@@ -31862,6 +31929,19 @@ static void readerFetchTaskFn(void*) {
        if (txt_at) addLink(TR("Back to the start"), 0);
        s_reader_nlinks = nl;
        snprintf(result_msg, sizeof result_msg, "%s", url); result_ok = true;
@@ -270,7 +280,7 @@ index 44cc3fc..390b574 100644
      } else if (s_reader_text) { size_t parsed_links = 0;
        size_t tl = ReaderContent::htmlToText((const char*)raw, total, s_reader_text, kReaderTextCap,
                                              url, s_reader_links, kReaderMaxLinks, &parsed_links);
-@@ -32012,6 +32089,28 @@ static void readerShowLoading() { readerShowMessage(LV_SYMBOL_REFRESH "  Loading
+@@ -32012,6 +32092,29 @@ static void readerShowLoading() { readerShowMessage(LV_SYMBOL_REFRESH "  Loading
  static void readerRenderBody() {
    if (!s_reader_scroll) return;
    lv_obj_clean(s_reader_scroll);
@@ -285,7 +295,8 @@ index 44cc3fc..390b574 100644
 +    lv_obj_clear_flag(page, LV_OBJ_FLAG_SCROLLABLE);
 +    lv_obj_set_style_pad_all(page, 0, LV_PART_MAIN);
 +    lv_obj_set_pos(page, 0, 0);
-+    lv_obj_set_width(page, lv_obj_get_width(s_reader_scroll) - 16);
++    const lv_coord_t body_w = lv_obj_get_width(s_reader_scroll);
++    lv_obj_set_width(page, body_w > 40 ? body_w - 16 : lv_disp_get_hor_res(nullptr) - 24);
 +    lv_obj_set_height(page, LV_SIZE_CONTENT);
 +    if (browserRenderInto(page, s_reader_url, s_reader_html, s_reader_html_len,
 +                          readerRendererLinkCb)) {
@@ -299,7 +310,7 @@ index 44cc3fc..390b574 100644
    lv_obj_set_flex_flow(s_reader_scroll, LV_FLEX_FLOW_COLUMN);
    lv_obj_set_flex_align(s_reader_scroll, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
    lv_obj_set_style_pad_row(s_reader_scroll, 2, LV_PART_MAIN);
-@@ -56926,6 +57025,31 @@ static unsigned long s_hw_last_space_ms = 0;
+@@ -56926,6 +57029,31 @@ static unsigned long s_hw_last_space_ms = 0;
  // Route a physical-keyboard character into the textarea currently being edited
  // — the on-screen keyboard's target, which is the chat composer directly or the
  // settings mirror textarea. No field open -> the key is ignored.
@@ -331,7 +342,7 @@ index 44cc3fc..390b574 100644
  static void handleHwKey(int key) {
    if (key != ' ') s_hw_last_space_ms = 0;
    if (!g_lv.keyboard) return;
-@@ -57120,6 +57244,33 @@ if (g_lv.task && g_lv.task->isManualLock()) {
+@@ -57120,6 +57248,33 @@ if (g_lv.task && g_lv.task->isManualLock()) {
      if (g_lv.keyboard) lv_keyboard_set_textarea(g_lv.keyboard, nullptr);
      ta_focused = nullptr;
    }
@@ -365,7 +376,7 @@ index 44cc3fc..390b574 100644
  #if CAP_KEYPAD_NAV && !defined(TLORA_PAGER)
    // Edit mode (keyboard-nav ON only): a focused field becomes the typing target after
    // select/Enter (below) — until then `ta` is null so the nav keys navigate. With
-@@ -57460,6 +57611,11 @@ if (g_lv.task && g_lv.task->isManualLock()) {
+@@ -57460,6 +57615,11 @@ if (g_lv.task && g_lv.task->isManualLock()) {
      }
      accentBoxHide();
    } else if (key == ' ') {
@@ -377,7 +388,7 @@ index 44cc3fc..390b574 100644
      // Double-tap SPACE within kDoubleSpaceMs toggles between English and
      // the configured secondary keyboard. If no secondary is set, it behaves
      // as a normal space. The limit is 250 ms, except on the M9: its same-key
-@@ -57488,6 +57644,7 @@ if (g_lv.task && g_lv.task->isManualLock()) {
+@@ -57488,6 +57648,7 @@ if (g_lv.task && g_lv.task->isManualLock()) {
        lv_textarea_add_char(ta, ' ');
      }
    } else if (key == 0x0D) {                   // regular ENTER (CR)
@@ -385,7 +396,7 @@ index 44cc3fc..390b574 100644
      // Enter is a non-typing action (send / newline / submit) — always tear down the
      // accent + @-mention popups. The Enter-to-send path keeps the keyboard up "for the
      // next message", so without this the accent box for the last letter lingers over
-@@ -61975,6 +62132,24 @@ enum AppDrawerAction {
+@@ -61975,6 +62136,21 @@ enum AppDrawerAction {
    APPACT_TERMINAL, APPACT_FILES, APPACT_FILE_TRANSFER, APPACT_SPECTRUM, APPACT_SNAKE, APPACT_VNC, APPACT_REMOTE, APPACT_READER,
    APPACT_DISCOVER, APPACT_STORE,
    APPACT_USB_FILES,
@@ -404,13 +415,19 @@ index 44cc3fc..390b574 100644
 +#if WADAMESH_DOWNLOAD
 +  APPACT_DOWNLOAD,
 +#endif
-+#if WADAMESH_BROWSER
-+  APPACT_BROWSER,
-+#endif
    APPACT_LUA_BASE = 100,   // APPACT_LUA_BASE + i = installed Lua app s_lua_inst[i]
  };
  // The drawer's built-in tiles, which are also what an App widget on Home can open.
-@@ -62017,6 +62192,24 @@ static const AppTileDef k_app_tiles[] = {
+@@ -62002,7 +62178,7 @@ static const AppTileDef k_app_tiles[] = {
+ #endif
+   { UI_ICON_SLIDERS_HORIZONTAL, "Settings",  APPACT_SETTINGS,  HUE_SYS },     // "!" when an update waits
+ #if defined(MULTI_TRANSPORT_COMPANION) && CAP_WEB_BROWSER
+-  { UI_ICON_GLOBE,              "Web",       APPACT_READER,    HUE_PLACE },   // on-device text browser
++  { UI_ICON_GLOBE,              "Web",       APPACT_READER,    HUE_PLACE },   // on-device web browser (Lexbor layout)
+ #endif
+ #if CAP_FILESYSTEM || defined(TLORA_PAGER)
+   { UI_ICON_FOLDER,             "Files",     APPACT_FILES,     HUE_SYS },
+@@ -62017,6 +62193,21 @@ static const AppTileDef k_app_tiles[] = {
    { UI_ICON_GAMEPAD_2,          "Snake",     APPACT_SNAKE,     HUE_MSG },     // native snake (Lua boards install it from the Store)
  #else
    { UI_ICON_STORE,              "Store",     APPACT_STORE,     HUE_MSG },     // Lua app store
@@ -429,13 +446,19 @@ index 44cc3fc..390b574 100644
 +#endif
 +#if WADAMESH_DOWNLOAD
 +  { UI_ICON_LINK,               "Download",   APPACT_DOWNLOAD,  HUE_SYS },     // any http(s) URL to the card
-+#endif
-+#if WADAMESH_BROWSER
-+  { UI_ICON_GLOBE,              "Web",        APPACT_BROWSER,   HUE_PLACE },   // HTML/CSS page renderer
  #endif
    { UI_ICON_HOUSE,              "Home",      APPACT_CMDCENTER, HUE_SYS },     // back to the Home widgets
    { UI_ICON_POWER,              "Power",     APPACT_POWER,     kAppHueDanger },
-@@ -62401,6 +62594,24 @@ static void appLaunch(int act, lv_event_t* e) {
+@@ -62389,7 +62580,7 @@ static void appLaunch(int act, lv_event_t* e) {
+     case APPACT_REMOTE:    openRemotePage();     return;   // reboot into the web-resolution headless UI
+ #endif
+ #if defined(MULTI_TRANSPORT_COMPANION) && CAP_WEB_BROWSER
+-    case APPACT_READER:    openReaderPage();     return;   // on-device text browser (no proxy)
++    case APPACT_READER:    openReaderPage();     return;   // on-device web browser (no proxy)
+ #endif
+     case APPACT_ADVERT:    openAdvertModalCb(e);  return;
+     case APPACT_POWER:     openPowerMenu();      return;
+@@ -62401,6 +62592,21 @@ static void appLaunch(int act, lv_event_t* e) {
  #else
      case APPACT_SNAKE:     SnakeGame::launch();  return;
  #endif
@@ -454,13 +477,10 @@ index 44cc3fc..390b574 100644
 +#if WADAMESH_DOWNLOAD
 +    case APPACT_DOWNLOAD:  DownloadApp::launch();  return; // any http(s) URL to the card
 +#endif
-+#if WADAMESH_BROWSER
-+    case APPACT_BROWSER:   openReaderPage();   return; // HTML/CSS page renderer
-+#endif
  #if defined(HAS_TOUCH_UI)
      case APPACT_TERMINAL:  homeTerminalCb(e);    return;
  #endif
-@@ -89760,3 +89971,17 @@ static void docAuditFocus() {
+@@ -89760,3 +89966,17 @@ static void docAuditFocus() {
  }
  #endif
  #endif  // DOC_CAPTURE
