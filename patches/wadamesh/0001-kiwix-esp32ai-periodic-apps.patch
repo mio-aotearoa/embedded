@@ -1,8 +1,8 @@
 diff --git a/platformio.ini b/platformio.ini
-index 75e3d7e..5a06631 100644
+index 75e3d7e..1f4b58c 100644
 --- a/platformio.ini
 +++ b/platformio.ini
-@@ -669,6 +669,25 @@ build_flags =
+@@ -669,6 +669,29 @@ build_flags =
    -D CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=16384
    -D CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=4096
  
@@ -25,26 +25,31 @@ index 75e3d7e..5a06631 100644
 +  -D WADAMESH_ESP32AI=1
 +  -I ../../firmware/tdeck-plus/common
 +  -I ../../firmware/tdeck-plus/esp32ai
++
++  ; --- periodic table: NeoCalculator's element data, drawn as one LVGL grid ---
++  -D WADAMESH_PERIODIC=1
++  -I ../../firmware/tdeck-plus/periodic
  build_src_filter =
    +<*.cpp>
    +<*.c>
-@@ -678,6 +697,11 @@ build_src_filter =
+@@ -678,6 +701,12 @@ build_src_filter =
    +<ui-touch/*.cpp>
    +<ui-touch/*.c>
    +<../variants/lilygo_tdeck/*.cpp>
 +  +<../../../firmware/tdeck-plus/kiwix/*.cpp>
 +  +<../../../firmware/tdeck-plus/common/*.cpp>
 +  +<../../../firmware/tdeck-plus/esp32ai/*.cpp>
++  +<../../../firmware/tdeck-plus/periodic/*.cpp>
 +  +<../../../third_party/zstd/lib/common/*.c>
 +  +<../../../third_party/zstd/lib/decompress/*.c>
  
  lib_deps =
    https://github.com/ALLFATHER-BV/meshcomod.git#core-v1.18.0
 diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
-index 44cc3fc..a42db4e 100644
+index 44cc3fc..541bb28 100644
 --- a/src/ui-touch/UITask.cpp
 +++ b/src/ui-touch/UITask.cpp
-@@ -154,6 +154,12 @@ static void* wadaMp3Scratch() { return s_wada_mp3_scratch; }
+@@ -154,6 +154,15 @@ static void* wadaMp3Scratch() { return s_wada_mp3_scratch; }
  #include <Utils.h>
  #include <LvglPsramAlloc.h>   // PSRAM-preferred alloc helpers for the map tile cache
  #include "SnakeGame.h"        // Apps → Snake (self-contained game module)
@@ -54,10 +59,13 @@ index 44cc3fc..a42db4e 100644
 +#if WADAMESH_ESP32AI
 +#include "esp32ai_app.h"      // Apps → ESP-AI: model assets on the card, fetched over Wi-Fi
 +#endif
++#if WADAMESH_PERIODIC
++#include "periodic_app.h"      // Apps → Periodic Table: 118 elements, LVGL-drawn grid
++#endif
  #include "LuaHost.h"          // Lua app host (LUA_APPS.md; Phase 0 spike gate)
  #include "LuaAppHost.h"       // sandboxed Lua apps (LUA_APPS.md Phase 1; self-gated on CAP_LUA_APPS)
  
-@@ -61975,6 +61981,12 @@ enum AppDrawerAction {
+@@ -61975,6 +61984,15 @@ enum AppDrawerAction {
    APPACT_TERMINAL, APPACT_FILES, APPACT_FILE_TRANSFER, APPACT_SPECTRUM, APPACT_SNAKE, APPACT_VNC, APPACT_REMOTE, APPACT_READER,
    APPACT_DISCOVER, APPACT_STORE,
    APPACT_USB_FILES,
@@ -67,10 +75,13 @@ index 44cc3fc..a42db4e 100644
 +#if WADAMESH_ESP32AI
 +  APPACT_ESP32AI,
 +#endif
++#if WADAMESH_PERIODIC
++  APPACT_PERIODIC,
++#endif
    APPACT_LUA_BASE = 100,   // APPACT_LUA_BASE + i = installed Lua app s_lua_inst[i]
  };
  // The drawer's built-in tiles, which are also what an App widget on Home can open.
-@@ -62017,6 +62029,12 @@ static const AppTileDef k_app_tiles[] = {
+@@ -62017,6 +62035,15 @@ static const AppTileDef k_app_tiles[] = {
    { UI_ICON_GAMEPAD_2,          "Snake",     APPACT_SNAKE,     HUE_MSG },     // native snake (Lua boards install it from the Store)
  #else
    { UI_ICON_STORE,              "Store",     APPACT_STORE,     HUE_MSG },     // Lua app store
@@ -80,10 +91,13 @@ index 44cc3fc..a42db4e 100644
 +#endif
 +#if WADAMESH_ESP32AI
 +  { UI_ICON_ZAP,                "ESP-AI",    APPACT_ESP32AI,   HUE_MSG },     // model assets on the card
++#endif
++#if WADAMESH_PERIODIC
++  { UI_ICON_LAYOUT_GRID,        "Elements",  APPACT_PERIODIC,  HUE_SYS },     // periodic table, tap for details
  #endif
    { UI_ICON_HOUSE,              "Home",      APPACT_CMDCENTER, HUE_SYS },     // back to the Home widgets
    { UI_ICON_POWER,              "Power",     APPACT_POWER,     kAppHueDanger },
-@@ -62401,6 +62419,12 @@ static void appLaunch(int act, lv_event_t* e) {
+@@ -62401,6 +62428,15 @@ static void appLaunch(int act, lv_event_t* e) {
  #else
      case APPACT_SNAKE:     SnakeGame::launch();  return;
  #endif
@@ -93,10 +107,13 @@ index 44cc3fc..a42db4e 100644
 +#if WADAMESH_ESP32AI
 +    case APPACT_ESP32AI:   Esp32AiApp::launch(); return;   // model manager, assets on the card
 +#endif
++#if WADAMESH_PERIODIC
++    case APPACT_PERIODIC:  PeriodicApp::launch(); return;  // 118 elements, tap for details
++#endif
  #if defined(HAS_TOUCH_UI)
      case APPACT_TERMINAL:  homeTerminalCb(e);    return;
  #endif
-@@ -89760,3 +89784,17 @@ static void docAuditFocus() {
+@@ -89760,3 +89796,17 @@ static void docAuditFocus() {
  }
  #endif
  #endif  // DOC_CAPTURE

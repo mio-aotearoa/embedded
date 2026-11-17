@@ -95,18 +95,43 @@ the firmware's mount policy or open-file budget.
 * wadamesh's Reader is the reuse that fits: same panel, same fonts, same
   keyboard/trackball policy, already shipping.
 
+### Periodic table (`El-EnderJ/NeoCalculator`) — data ported, UI rebuilt
+
+NeoCalculator's periodic table is an LVGL 9 app (`lv_obj_delete`,
+`lv_event_get_layer`, custom draw), and this firmware is pinned to 8.3.11, so
+the app is not lifted: its **data** is. `firmware/tdeck-plus/periodic/periodic_data.h`
+carries the 118 elements (number, symbol, name, mass, category,
+electronegativity, electron configuration) and the 18×10 `kLayout` from
+`src/apps/ChemDatabase.h`, under the same GPL-3.0-or-later licence, with the
+attribution in the header.
+
+`periodic_app.cpp` draws the grid in a single LVGL object instead of 118
+buttons: `LV_EVENT_DRAW_MAIN` paints each cell (category colour, selected cell
+outlined) and `LV_EVENT_PRESSED` converts the pointer position to a row/column
+and looks the element up in `kLayout`. The strip under the grid shows
+`#Z symbol name — mass` and `category · EN · configuration`. It uses the same
+`AppPage` chrome as Kiwix/ESP-AI, so the tall "< Periodic Table" bar, back
+affordance and async teardown are the firmware's, not a copy.
+
+What is not carried over: the Molar mass and Equation-balance tabs, search, and
+the trackball `NAV_LUT` (the grid is touch-first; the trackball moves the
+pointer and taps a cell).
+
 ### wadamesh changes (patch series)
 
-`patches/wadamesh/0001-kiwix-and-esp32ai-apps.patch` is the whole integration:
+`patches/wadamesh/0001-kiwix-esp32ai-periodic-apps.patch` is the whole
+integration:
 
-1. `#include "kiwix_app.h"` / `"esp32ai_app.h"` beside the other app modules.
-2. `APPACT_KIWIX` and `APPACT_ESP32AI` in the drawer action enum, a `Kiwix`
-   tile (gated on `CAP_FILESYSTEM`, since the app needs the card) plus an
-   `ESP-AI` tile, and their `appLaunch()` cases.
+1. `#include "kiwix_app.h"` / `"esp32ai_app.h"` / `"periodic_app.h"` beside the
+   other app modules.
+2. `APPACT_KIWIX`, `APPACT_ESP32AI` and `APPACT_PERIODIC` in the drawer action
+   enum, a `Kiwix` tile (gated on `CAP_FILESYSTEM`, since the app needs the
+   card), an `ESP-AI` tile and an `Elements` tile, and their `appLaunch()` cases.
 3. `extern "C" void wadameshOpenReaderUrl(const char*)` at the end of
    `UITask.cpp`, a one-line wrapper around the existing `openReaderPage()`.
 4. `platformio.ini` (T-Deck env only): include paths for
-   `firmware/tdeck-plus/{kiwix,common,esp32ai}` and `third_party/zstd/lib`, the
+   `firmware/tdeck-plus/{kiwix,common,esp32ai,periodic}` and
+   `third_party/zstd/lib`, the
    zstd decompress-only defines, and `build_src_filter` entries compiling our
    apps, the shared downloader and zstd's `common/` + `decompress/` sources into
    the firmware. The filter paths climb out of the project

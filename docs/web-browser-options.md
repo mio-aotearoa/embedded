@@ -14,6 +14,14 @@ navigation and back bar (`openReaderPage()` in `UITask.cpp`). Kiwix articles are
 handed to that same page. It has no CSS layout, images, forms or JavaScript, and
 its HTTPS path uses `setInsecure()` with no certificate store.
 
+**Can the Reader do CSS or JS? No, by construction.** `ReaderContent::htmlToText`
+(`src/ui-touch/ReaderContent.cpp`) runs one tag-stripping pass: it skips the body
+of every `<script>` and `<style>` element, drops all other tags, decodes
+entities, and keeps block/line boundaries plus `<a href>` targets. Nothing
+computes a style, lays out a box, or executes code — so a page arrives as plain
+text with link targets, regardless of what its CSS says. Media and forms are
+dropped for the same reason.
+
 That is the baseline any browser engine has to beat, and it costs 0 bytes of
 new flash.
 
@@ -25,10 +33,10 @@ new flash.
 * **LVGL version:** wadamesh pins **LVGL 8.3.11**. eBrowser and Agave's
   `watchweb` are written against LVGL 9.x, so either the engine or the firmware
   has to move.
-* **Flash:** the app partition is 3.875 MB and the current image, with Kiwix,
-  ESP-AI and the downloader, is **3,859,664 B** — about **199 KB of headroom**.
-  There is no second copy in the tile/SPIFFS partitions, and the two 3.875 MB
-  slots exist so OTA can keep working.
+* **Flash:** the app partition is 3.875 MB (0x3E0000) and the current image,
+  with Kiwix, ESP-AI, the downloader and the periodic table, is **3,868,217 B**
+  — about **195 KB of headroom**. The two 3.875 MB slots exist so OTA can keep
+  working; the table below is how that changes.
 * **RAM:** 512 KB internal SRAM + 8 MB PSRAM. The S3 has no MMU, and QuickJS or
   a Lexbor DOM is a heap consumer; PSRAM latency is also where LVGL already
   spends its budget.
@@ -48,6 +56,32 @@ The table in the request matches this: TactileBrowser and eBrowser are ESP32
 projects, Agave has "advanced" CSS and QuickJS but its firmware story is an
 example, not a port. "Claimed support" for eBrowser is exactly that — a claim on
 the project site, with no ESP32 code to build from in the repository.
+
+## Making room: partition layouts
+
+The app slot is 3.875 MB only because the table keeps a second slot for OTA.
+`firmware/tdeck-plus/partitions_tdeck_browser.csv` is a drop-in table for a
+browser build, same 16 MB flash, same tiles/spiffs offsets:
+
+| Layout | App slot | OTA | Map tiles | User data |
+|---|---|---|---|---|
+| today (`partitions_tdeck_touch.csv`) | 3.875 MB ×2 | yes | 4.75 MB | kept |
+| **single app** (`partitions_tdeck_browser.csv`) | **7.75 MB** (0x7C0000) | no | 4.75 MB | kept |
+| single app, no tiles | 12.5 MB (0xC80000) | no | lost | kept |
+| two 5 MB slots | 5 MB ×2 | yes | ~2.5 MB | moved (wiped) |
+
+The first option is the one worth taking: it doubles the app budget without
+touching `tiles` (0x7D0000) or `spiffs` (0xC90000), so a USB re-flash keeps the
+tile cache and every stored preference/contact/channel. The cost is OTA — the
+`otadata` partition stays but there is no second slot, so updates are USB-only.
+Dropping the tile cache buys another 4.75 MB but loses offline maps, and moving
+SPIFFS to fit two larger slots wipes user data on the first flash.
+
+Changing the table is not the same as fitting a browser: 7.75 MB of flash still
+leaves the S3's 512 KB SRAM and PSRAM bandwidth as the binding constraint for a
+DOM/CSS/JS engine. It removes the "there is no room at all" objection, which is
+why the engine work below is worth doing against this table rather than the
+current one.
 
 ## Why none of them drops in
 

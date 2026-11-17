@@ -30,9 +30,9 @@ git clone --recurse-submodules <this-repo> && cd <this-repo>
 ```
 
 Two series exist: esp32-photoframe (a build hook and a boot-mode hook) and
-wadamesh (the Kiwix app: build wiring, a drawer tile and a Reader bridge).
-ESP32Drop and zstd are used exactly as published, from the submodule working
-tree.
+wadamesh (the app integrations: Kiwix, ESP-AI and the periodic table — build
+wiring, drawer tiles and a Reader bridge). ESP32Drop and zstd are used exactly
+as published, from the submodule working tree.
 
 ## The two designs
 
@@ -57,8 +57,17 @@ weights from a flash mapping, and the 14.9 MB model does not fit this board's
 flash layout, so the page manages the assets and says that generation needs the
 runtime port.
 
+The `Elements` page is the periodic table from
+[El-EnderJ/NeoCalculator](https://github.com/El-EnderJ/NeoCalculator)
+(GPL-3.0-or-later): its element data and 18×10 layout, redrawn as one LVGL grid
+for this firmware's LVGL 8.3 rather than their LVGL 9 app. Tap a cell for mass,
+category, electronegativity and electron configuration.
+
 Browser-engine options (TactileBrowser, eBrowser, Agave) are compared in
-[`docs/web-browser-options.md`](docs/web-browser-options.md).
+[`docs/web-browser-options.md`](docs/web-browser-options.md), which also covers
+what the Reader can do (no CSS, no JavaScript) and
+`firmware/tdeck-plus/partitions_tdeck_browser.csv` — a 7.75 MB single-app
+partition table that keeps the map tiles and user data, at the cost of OTA.
 
 **reTerminal E1002** — esp32-photoframe owns boot, storage, image pipeline and
 deep sleep. An ESP-IDF component (`components/airdrop_bridge`) compiles
