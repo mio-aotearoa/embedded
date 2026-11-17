@@ -89,8 +89,10 @@ bool airdrop_bridge_boot_requested(void)
     gpio_config_t cfg = {};
     cfg.pin_bit_mask = 1ULL << (int)AIRDROP_BRIDGE_TRIGGER_GPIO;
     cfg.mode = GPIO_MODE_INPUT;
-    cfg.pull_up_en = AIRDROP_BRIDGE_TRIGGER_ACTIVE_LOW ? GPIO_PULLUP_ENABLE : GPIO_PULLDOWN_ENABLE;
-    cfg.pull_down_en = AIRDROP_BRIDGE_TRIGGER_ACTIVE_LOW ? GPIO_PULLDOWN_DISABLE : GPIO_PULLUP_DISABLE;
+    cfg.pull_up_en = AIRDROP_BRIDGE_TRIGGER_ACTIVE_LOW ? GPIO_PULLUP_ENABLE
+                                                       : GPIO_PULLUP_DISABLE;
+    cfg.pull_down_en = AIRDROP_BRIDGE_TRIGGER_ACTIVE_LOW ? GPIO_PULLDOWN_DISABLE
+                                                         : GPIO_PULLDOWN_ENABLE;
     cfg.intr_type = GPIO_INTR_DISABLE;
 
     if (gpio_config(&cfg) != ESP_OK) {

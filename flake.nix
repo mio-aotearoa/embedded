@@ -67,11 +67,21 @@
                 firmware/tdeck-plus/kiwix/zim_reader.cpp \
                 build/obj/*.o -o build/test_zim_archive
               ./build/test_zim_archive
+              gcc -std=c11 -O1 -Wall -Wextra \
+                -I firmware/reterminal-e1002/companion \
+                -c firmware/reterminal-e1002/companion/airdrop_companion.c \
+                -o build/obj/airdrop_companion.o
+              g++ -std=gnu++17 -O1 -Wall -Wextra \
+                -I firmware/reterminal-e1002/companion \
+                firmware/reterminal-e1002/companion/test/test_airdrop_companion.cpp \
+                build/obj/airdrop_companion.o -o build/test_airdrop_companion
+              ./build/test_airdrop_companion
               runHook postBuild
             '';
             installPhase = ''
               mkdir -p $out/bin
               cp build/test_zim_archive $out/bin/
+              cp build/test_airdrop_companion $out/bin/
             '';
             meta = with pkgs.lib; {
               description = "ZIM parser host test (hermetic)";

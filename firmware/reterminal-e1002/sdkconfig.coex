@@ -1,0 +1,14 @@
+# Experimental "both at once" variant: AWDL and Wi-Fi share the radio.
+#
+# This fragment only turns on the vendor coexistence scheduler and keeps the
+# SoftAP support the AWDL port needs. It is NOT yet a functional simultaneous
+# mode: ESP32Drop still re-initialises the radio and takes it exclusively.
+# The build variant exists so the port work (APSTA, channel pinning, session
+# gating) can be developed and compared against the safe airdrop-only image.
+
+CONFIG_ESP_COEX_SW_COEXIST_ENABLE=y
+CONFIG_ESP_WIFI_SOFTAP_SUPPORT=y
+
+# The AP and the STA must both sit on the AWDL social channel (6). These are
+# deliberately explicit so a future APSTA patch cannot silently hop channels.
+CONFIG_ESP_WIFI_AP_CHANNEL=6

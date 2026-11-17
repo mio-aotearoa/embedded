@@ -20,7 +20,7 @@ idf_component_register(
         "${ESP32DROP_DIR}/src/airdrop/core"
         "${ESP32DROP_DIR}/src/airdrop/port"
     REQUIRES
-        airdrop_compat
+        esp32drop_compat
         board_hal
         esp_driver_gpio
         esp_event
@@ -35,4 +35,4 @@ idf_component_register(
 
 # ESP32Drop is written for the Arduino ESP32 core but uses ESP-IDF APIs; the
 # shim supplies the Arduino names its ports include.
-target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-unused-parameter)
+target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-unused-parameter -Wno-error=comment)
