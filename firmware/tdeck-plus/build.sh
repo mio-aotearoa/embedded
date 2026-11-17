@@ -24,7 +24,12 @@ case "$remote" in
     *) die "third_party/wadamesh must be ALLFATHER-BV/wadamesh (found: ${remote:-no remote})" ;;
 esac
 
-./scripts/patches.sh apply wadamesh
+# wadamesh carries the app hooks; TactileBrowser makes Lexbor's encoding
+# tables const so the browser's HTML/CSS engine fits in flash, not DRAM.
+./scripts/patches.sh apply wadamesh TactileBrowser
+
+# Duktape ships raw sources only: build its amalgamation (build/duktape/).
+./scripts/duktape.sh
 
 # One core dir for both build paths (script and `nix run .#firmware`), so the
 # espressif32 platform and lib_deps are downloaded only once.

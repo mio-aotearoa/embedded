@@ -88,21 +88,26 @@ DOM/CSS/JS engine. It removes the "there is no room at all" objection, which is
 why the engine work below is worth doing against this table rather than the
 current one.
 
-## What was actually built: TactileBrowser's core
+## What was actually built: TactileBrowser's core + Duktape
 
 The survey above assumed every candidate brought its renderer. TactileBrowser
-does not: its `tactilebrowser_core` is a Lexbor-based HTML/CSS/layout engine
-with **zero LVGL calls** — rendering goes through a `RenderInterface` table. So
-its *engine* is reused as a pinned submodule (`third_party/TactileBrowser`) and
-only the renderer is ours (`firmware/tdeck-plus/browser/`, LVGL 8.3 widgets).
-That is the state of the work: the engine and its core compile on the host, the
-LVGL 8.3 platform layer is written, but the firmware link overflows DRAM by
-**613,584 B** on Lexbor's legacy multibyte encoding tables (760 KB of writable
-initialized data). Making them `const` moved them to flash and only reduced the
-overflow to **270,176 B**, so the browser is not in the image yet; placing those
-tables in flash/PSRAM through a patch series is the blocking task. The page
-would offer URL entry, fetch, HTML/CSS render and clickable links, with no
-JavaScript.
+does not: its `tactilebrowser_core` is a Lexbor-based HTML/CSS engine with **zero
+LVGL calls** — rendering goes through a `RenderInterface` table. Its *engine* is
+reused as a pinned submodule (`third_party/TactileBrowser`); only the renderer,
+the fetcher and the JS bridge are ours (`firmware/tdeck-plus/browser/`).
+
+It is in the shipping image. The blocker was Lexbor's legacy encoding tables
+(~760 KB of writable initialized data, 613,584 B of DRAM overflow); making every
+table in `encoding/multi.c` `const` through `patches/TactileBrowser/` moves them
+to flash. The T-Deck image uses **157,872 / 327,680 B of RAM (48.2%)** and
+**6,180,493 / 8,126,464 B of flash (76.1%)**.
+
+A page gets: URL entry, fetch (redirects followed, TLS `setInsecure()`), HTML
+parsing, the core's CSS subset (tag/class/id selectors, box model, colours,
+gradients, text alignment), clickable links, and ES5.1 JavaScript through
+Duktape 2.7.0 — inline `<script>` with `document.write()`, `document.title` and
+`console.log()`. No DOM, no event handlers, no external scripts or stylesheets,
+no images.
 
 The litehtml + Duktape plan below remains the alternative route if the engine's
 CSS coverage proves too thin; it is kept because it explains the drawing/canvas
@@ -137,9 +142,9 @@ Milestones, in order:
 4. Wire the Reader's fetch path (HTTP(S), `setInsecure()`) as the byte source and
    the existing Reader bar as the chrome.
 
-Nothing in this section is compiled yet: it is the implementation plan that
-follows from the survey, and it is the one path that fits LVGL 8.3 rather than
-replacing the whole UI toolkit.
+Nothing in this section is compiled: the shipped browser is the TactileBrowser
+core above. The plan stays because it explains the offscreen-canvas route and the
+DOM milestone the current page still lacks.
 
 ## Why none of them drops in
 

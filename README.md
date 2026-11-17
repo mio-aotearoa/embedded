@@ -75,11 +75,16 @@ implementations are Rust/Go/Win32), so this is our own protocol v2 client: peer
 discovery, `prepare-upload`, a streamed `upload`, and `cancel` on failure. It
 sends over plain HTTP and does not receive.
 
-The browser reuses TactileBrowser's `tactilebrowser_core` (Lexbor) from a pinned
-submodule and has an LVGL 8.3 platform layer written, but it is **not in the
-image yet**: Lexbor's legacy encoding tables overflow the S3's DRAM (613,584 B;
-270,176 B even after a `const` experiment). See
-[`docs/architecture.md`](docs/architecture.md) for the measured blocker.
+The browser is **in the image**. It reuses TactileBrowser's
+`tactilebrowser_core` (Lexbor) from a pinned submodule and adds only the platform
+layer (`firmware/tdeck-plus/browser/`): an LVGL 8.3 renderer, an HTTP(S) fetcher,
+and the page chrome — URL bar, Go, on-screen keyboard, scrolling view, clickable
+links. It renders HTML with the core's CSS subset and runs inline scripts on
+Duktape 2.7.0. Lexbor's legacy encoding tables are `const` through
+`patches/TactileBrowser/`, so ~760 KB of tables live in flash instead of DRAM:
+the image uses **6,180,493 of 8,126,464 bytes of flash (76.1%)** and **157,872 of
+327,680 bytes of RAM (48.2%)**. See
+[`docs/architecture.md`](docs/architecture.md) for the measured before/after.
 
 Browser-engine options (TactileBrowser, eBrowser, Agave) are compared in
 [`docs/web-browser-options.md`](docs/web-browser-options.md), which also covers

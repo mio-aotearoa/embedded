@@ -98,6 +98,7 @@
               pkgs.python3
               pkgs.gnumake
               pkgs.cacert
+              pkgs.curl
               pkgs.which
             ];
             text = ''
@@ -115,7 +116,8 @@
               fi
 
               cd "$root"
-              ./scripts/patches.sh apply wadamesh
+              ./scripts/patches.sh apply wadamesh TactileBrowser
+              ./scripts/duktape.sh
 
               export PLATFORMIO_CORE_DIR="''${PLATFORMIO_CORE_DIR:-$root/.platformio}"
               export PLATFORMIO_SETTING_ENABLE_TELEMETRY=false

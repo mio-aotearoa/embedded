@@ -12,6 +12,7 @@
 #include "AppPage.h"
 #include "i18n.h"
 #include "tactilebrowser_core.h"
+#include "js_engine.h"
 
 #include <Arduino.h>
 #include <HTTPClient.h>
@@ -389,15 +390,29 @@ void BrowserApp::renderPage(void)
 
     lv_obj_clean(view_);
     const lv_coord_t w = lv_obj_get_width(view_);
+
+    // Inline scripts run first: document.write() output replaces its <script>
+    // block, so Lexbor lays out what the page produced rather than the source.
+    size_t scriptedLen = 0;
+    char *scripted = browserJsApplyScripts(s_fetch.body, s_fetch.len, &scriptedLen);
+    const char *html = scripted ? scripted : s_fetch.body;
+    const size_t htmlLen = scripted ? scriptedLen : s_fetch.len;
+
     const RenderResult result = tactilebrowser_render_html_string(
-        s_fetch.url, s_fetch.body, s_fetch.len, view_, w, 4000);
+        s_fetch.url, html, htmlLen, view_, w, 4000);
+    free(scripted);
 
     if (result != RENDER_SUCCESS)
     {
         setStatus(TR("This page could not be rendered"));
         return;
     }
-    setStatus(s_fetch.url);
+    // A script error or console.log() line says more than the URL does.
+    const char *jsError = browserJsLastError();
+    const char *jsLog = browserJsLastLog();
+    if (jsError[0]) setStatus(jsError);
+    else if (jsLog[0]) setStatus(jsLog);
+    else setStatus(s_fetch.url);
 }
 
 void BrowserApp::goCb(lv_event_t *)

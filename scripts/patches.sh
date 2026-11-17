@@ -9,9 +9,10 @@
 #   scripts/patches.sh refresh <project>        # capture worktree diff as one patch
 #   scripts/patches.sh rebase <project> <ref>   # move submodule to <ref>, re-apply series
 #
-# A "project" is a directory name under patches/ (and third_party/): currently
-# esp32-photoframe and wadamesh. With no project argument every project is
-# processed.
+# A "project" is a directory name under patches/; its tree defaults to
+# third_party/<project>. When the patched code is a nested submodule (the browser
+# engine sits inside third_party/TactileBrowser), patches/<project>/dir names that
+# path instead. With no project argument every project is processed.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -30,11 +31,20 @@ projects() {
 }
 
 series_file() { echo "$PATCH_ROOT/$1/series"; }
-submodule_dir() { echo "$TP_ROOT/$1"; }
+subdir_file() { echo "$PATCH_ROOT/$1/dir"; }
+
+submodule_dir() {
+    local rel="$1"
+    if [ -f "$(subdir_file "$1")" ]; then
+        rel="$(cat "$(subdir_file "$1")")"
+    fi
+    echo "$TP_ROOT/$rel"
+}
 
 check_project() {
-    local p="$1"
-    [ -d "$(submodule_dir "$p")" ] || die "no submodule at third_party/$p"
+    local p="$1" dir
+    dir="$(submodule_dir "$p")"
+    [ -d "$dir" ] || die "no submodule at ${dir#$ROOT/}"
     [ -f "$(series_file "$p")" ] || die "no series file at patches/$p/series"
 }
 

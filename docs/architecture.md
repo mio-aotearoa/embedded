@@ -95,42 +95,47 @@ the firmware's mount policy or open-file budget.
 * wadamesh's Reader is the reuse that fits: same panel, same fonts, same
   keyboard/trackball policy, already shipping.
 
-### Browser — TactileBrowser's core, verified on the host, not yet in the image
+### Browser — TactileBrowser's core, linked and in the image
 
-**Status: the engine is reused and proven, the firmware link does not fit yet.**
-`third_party/TactileBrowser` is pinned; its core and all 203 Lexbor C files
-compile and link on the host (3.5 MB host binary), and its own render test
-binary builds. On the device the same sources overflow DRAM by **613,584 B**:
-Lexbor's legacy multibyte encoding tables (`lxb_encoding_multi_*_map`, JIS0208,
-Big5, EUC-KR, GB18030) are 760 KB of *initialized writable* data, and the S3 has
-no DRAM for that. Marking those tables `const` moved them to flash and cut the
-overflow to **270,176 B**, still too much, so the browser is **not in the build**
-(`WADAMESH_BROWSER` is off and `firmware/tdeck-plus/browser/` is not compiled).
-The next step is a patch series that places the remaining read-only tables in
-flash/PSRAM instead of a per-file experiment.
+**Status: the whole engine fits.**
 
-`third_party/TactileBrowser`'s core is reused, not reimplemented. The reason it drops in without the LVGL 9 problem the survey
-found: the core contains **no `lv_*` calls at all**. It parses HTML and CSS with
-Lexbor and renders through a `RenderInterface` of function pointers
-(`create_label`, `create_button`, `set_bg_gradient`, `register_link_handler`, …),
-so the only platform code is the renderer and the fetcher.
+`third_party/TactileBrowser` is pinned and its core is reused as-is: it parses
+HTML and CSS with Lexbor and renders through a `RenderInterface` of function
+pointers (`create_label`, `create_button`, `set_bg_gradient`,
+`register_link_handler`, …). That interface is why it drops in beside LVGL 8.3
+without the LVGL 9 problem the survey found: the core contains **no `lv_*` calls
+at all**. `firmware/tdeck-plus/browser/` is the platform code — every renderer
+callback wrapping LVGL widgets, an HTTP(S) fetcher on its own task (redirects
+followed, TLS `setInsecure()` like the Reader, 16 KB page cap, freed after
+rendering), and the page chrome: URL bar, Go, keyboard, scrolling white view,
+status line, links that navigate.
 
-`firmware/tdeck-plus/browser/` is that platform code: an LVGL 8.3 implementation
-of every callback (wrapping labels, buttons, text inputs/areas, transparent
-containers, colours, gradients, text alignment, clickable links) plus an
-HTTP(S) fetcher on its own task (redirects followed, TLS `setInsecure()` like the
-Reader, 16 KB page cap, freed after rendering). The page has a URL bar, Go, the
-on-screen keyboard, a scrolling white page view and a status line; links inside
-the page navigate.
+**What the link needed.** Lexbor's legacy multibyte tables
+(`lxb_encoding_multi_*_map`: JIS0208, JIS0212, Big5, EUC-KR, GB18030) are ~760 KB
+of *initialized writable* data, which ESP-IDF places in `.dram0.data` — on the S3
+that overflowed DRAM by **613,584 B**. `patches/TactileBrowser/0001` makes every
+table in that generated file `const` (the series applies to the nested Lexbor
+submodule via `patches/TactileBrowser/dir`), which moves them to
+`.flash.rodata`. `.dram0.data` is now 37,672 B and the T-Deck image uses
+**157,872 of 327,680 bytes of RAM (48.2%)** and **6,180,493 of 8,126,464 bytes of
+flash (76.1%)** — about 1.9 MB of flash left for the remaining apps. The pinned
+tree's own render tests still pass with the const tables.
 
-What the host build covers: the core parses HTML/CSS and drives the render
-interface; the LVGL 8.3 renderer in `firmware/tdeck-plus/browser/` is written but
-has not been linked or run on the panel, so no claim is made about its output.
+**JavaScript.** Inline scripts run on **Duktape 2.7.0 (ES5.1)**, the engine
+TactileBrowser's own ESP32 build uses. `scripts/duktape.sh` fetches the pinned
+release tarball by SHA-256, because Duktape's repository ships only raw sources
+(its amalgamation generator is Python 2-era). `js_engine.cpp` gives a page
+`document.write()`, `document.title` and `console.log()`: written markup replaces
+the `<script>` block before layout, and the last log line or script error goes to
+the status bar. `firmware/tdeck-plus/test/host/test_browser_js.cpp` covers
+generated markup, console output, skipped external scripts, plain pages and error
+reporting.
 
-What does not: **JavaScript**. The core has no JS engine and neither does this,
-so scripts are ignored; Duktape behind the same render interface is the next
-step, not something that is half-wired. There is also no external stylesheet
-support beyond what the core's downloader hook does, and no images.
+**Limits, stated plainly.** There is no DOM and no events: `document.write()` and
+`console.log()` are the whole JS surface, so frameworks and `onclick` handlers do
+nothing. External `<script src>` and external stylesheets are not fetched and
+images are not decoded. CJK glyphs still need the font work in
+[`cjk-rendering.md`](cjk-rendering.md).
 
 ### On-device downloader
 

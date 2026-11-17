@@ -1,5 +1,5 @@
 diff --git a/platformio.ini b/platformio.ini
-index 75e3d7e..2fcab10 100644
+index 75e3d7e..e17a42e 100644
 --- a/platformio.ini
 +++ b/platformio.ini
 @@ -537,7 +537,10 @@ platform = platformio/espressif32@6.11.0
@@ -14,7 +14,7 @@ index 75e3d7e..2fcab10 100644
  extra_scripts = pre:scripts/build/pre_gen_baked.py, pre:scripts/inject_wifi_env.py, pre:scripts/build/fatfs_exfat.py, pre:scripts/build/patch_lvgl_anim_uaf.py, pre:scripts/build/patch_lvgl_scroll_uaf.py, pre:scripts/build/patch_lvgl_async_del.py, pre:scripts/build/patch_lvgl_arabic.py, pre:scripts/build/patch_meshcore_txt_timestamp.py, pre:scripts/build/perf_lvgl.py, merge-bin.py
  custom_lvgl_o2 = yes   ; LVGL at -O2 (scripts/build/perf_lvgl.py): ~5% less time a frame, ~39 KB flash
  custom_lvgl_iram = lv_draw_sw_blend.c, lv_draw_label.c   ; their hot loops in IRAM: ~8% less a frame, ~6 KB internal RAM
-@@ -669,6 +672,40 @@ build_flags =
+@@ -669,6 +672,50 @@ build_flags =
    -D CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=16384
    -D CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=4096
  
@@ -52,10 +52,20 @@ index 75e3d7e..2fcab10 100644
 +  -D WADAMESH_DOWNLOAD=1
 +  -I ../../firmware/tdeck-plus/downloader
 +
++  ; --- Browser: HTML + basic CSS through the pinned TactileBrowser core ---
++  ; Lexbor's legacy encoding tables are const (patches/TactileBrowser), so they
++  ; live in flash instead of the ~760 KB of DRAM they would otherwise claim.
++  -D WADAMESH_BROWSER=1
++  -D LEXBOR_STATIC=1
++  -I ../../firmware/tdeck-plus/browser
++  -I ../../third_party/TactileBrowser/tactilebrowser_core/include
++  -I ../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source
++  -I ../../build/duktape
++
  build_src_filter =
    +<*.cpp>
    +<*.c>
-@@ -678,6 +715,14 @@ build_src_filter =
+@@ -678,6 +725,44 @@ build_src_filter =
    +<ui-touch/*.cpp>
    +<ui-touch/*.c>
    +<../variants/lilygo_tdeck/*.cpp>
@@ -65,6 +75,36 @@ index 75e3d7e..2fcab10 100644
 +  +<../../../firmware/tdeck-plus/periodic/*.cpp>
 +  +<../../../firmware/tdeck-plus/localsend/*.cpp>
 +  +<../../../firmware/tdeck-plus/downloader/*.cpp>
++  +<../../../firmware/tdeck-plus/browser/*.cpp>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/src/*.cpp>
++  +<../../../build/duktape/duktape.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/core/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/css/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/css/at_rule/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/css/property/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/css/selectors/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/css/syntax/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/css/syntax/tokenizer/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/dom/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/dom/interfaces/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/encoding/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/engine/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/html/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/html/interfaces/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/html/tokenizer/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/html/tree/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/html/tree/insertion_mode/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/ns/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/punycode/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/selectors/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/style/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/style/dom/interfaces/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/style/html/interfaces/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/tag/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/unicode/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/url/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/utils/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/ports/posix/lexbor/core/memory.c>
 +  +<../../../third_party/zstd/lib/common/*.c>
 +  +<../../../third_party/zstd/lib/decompress/*.c>
  

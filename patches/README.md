@@ -7,6 +7,8 @@ submodule commit.
 ```
 patches/<project>/series        ordered patch file names, one per line
 patches/<project>/NNNN-name.patch
+patches/<project>/dir           optional: submodule path when it is not
+                               third_party/<project> (nested submodules)
 ```
 
 Workflow:
@@ -45,3 +47,13 @@ numbered patch (the generated `9999-worktree.patch` is a scratch file).
 * `0002-airdrop-boot-window.patch` — adds `airdrop_bridge` to `main`'s
   `PRIV_REQUIRES` and a boot hook in `app_main` that runs the AirDrop receive
   window and then feeds the received file through photoframe's own display flow.
+
+## TactileBrowser
+
+* `0001-encoding-tables-const.patch` — makes every table in Lexbor's generated
+  `source/lexbor/encoding/multi.c` (and its `multi.h` declarations) `const`. The
+  maps are read-only decode tables, but as non-const data they land in
+  `.dram0.data`; on the S3 that was 760 KB of writable data and a 613,584 B DRAM
+  overflow. As `const` they go to `.flash.rodata` and the browser links. `dir`
+  points this series at `TactileBrowser/tactilebrowser_core/lexbor`, the nested
+  submodule that actually holds Lexbor, so `patches.sh apply` works unchanged.
