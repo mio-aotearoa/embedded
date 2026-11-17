@@ -109,3 +109,37 @@ syntax-checked with stubs. See `docs/architecture.md` for the exact list.
 The combined firmwares are therefore GPL-3.0. ESP32Drop's 0BSD terms are
 compatible. `third_party/*` keeps each project's own LICENSE file; this
 repository's own code is GPL-3.0 (see `LICENSE`).
+
+## Building the reTerminal E1002 firmware
+
+`firmware/reterminal-e1002/build.py` applies the esp32-photoframe series and
+builds one image per sdkconfig fragment. It needs `idf.py` and the ESP32-S3
+toolchain, and the generated assets have to exist first: the gzipped web UI
+(`main/webapp/*.gz`) and the splash buffers (`main/splash_data/*.epdgz`).
+
+```bash
+nix develop github:mirrexagon/nixpkgs-esp-dev#esp32s3-idf -c bash -c \
+  'firmware/reterminal-e1002/build.py airdrop'   # Wi-Fi first, AirDrop window after boot
+nix develop github:mirrexagon/nixpkgs-esp-dev#esp32s3-idf -c bash -c \
+  'firmware/reterminal-e1002/build.py coex'      # experimental Wi-Fi + AirDrop seam
+# outputs: build/e1002-airdrop/esp32-photoframe.bin, build/e1002-coex/esp32-photoframe.bin
+```
+
+The splash assets come from esp32-photoframe's own `generate_splash.py` when its
+native `canvas` dependency installs. Where it cannot (this repository's CI
+image), `scripts/pack_splash.py` renders the same layout with
+rsvg-convert/Inkscape/ImageMagick and packs the same gzip-compressed 4bpp
+buffer, writing the assets and `splash_meta.h` where the firmware expects them:
+
+```bash
+python3 scripts/pack_splash.py --board seeedstudio_reterminal_e1002
+```
+
+Host unit tests for both firmwares (ZIM parser, AirDrop companion link) need no
+ESP32 toolchain:
+
+```bash
+nix build .#host-tests \
+  && ./result/bin/test_zim_archive \
+  && ./result/bin/test_airdrop_companion
+```
