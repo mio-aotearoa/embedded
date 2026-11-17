@@ -26,6 +26,14 @@ numbered patch (the generated `9999-worktree.patch` is a scratch file).
 
 ## wadamesh
 
+The base is `jade-on-mesh/wadamesh-tak` (`third_party/wadamesh`). That fork's
+`main` has its own history and newer apps, so the move from
+`ALLFATHER-BV/wadamesh` (`3411a8f`) was a three-way re-apply with three manual
+resolutions: the reader fetch worker is now the fork's `readerFetchBody()` (our
+HTML-cache reset moved into it), the drawer enum/tile table holds the fork's
+apps and ours, and the env keeps this repository's USB-only one-slot partition
+table instead of the fork's dual 4.5 MB slots.
+
 * `0001-kiwix-esp32ai-periodic-apps.patch` — registers this repository's apps in
   wadamesh's T-Deck environment. Small hunks: the `kiwix_app.h` and
   `esp32ai_app.h` includes, the drawer tiles and `appLaunch()` cases for Kiwix,

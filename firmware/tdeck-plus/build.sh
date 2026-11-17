@@ -2,7 +2,7 @@
 # Build the T-Deck Plus firmware: wadamesh (pinned submodule) + this repo's
 # Kiwix app.
 #
-# The base is ALLFATHER-BV/wadamesh, pinned by .gitmodules. The Kiwix reader is
+# The base is jade-on-mesh/wadamesh-tak, pinned by .gitmodules. The Kiwix reader is
 # new code in this repository, compiled into wadamesh's own T-Deck PlatformIO
 # environment through patches/wadamesh/. Nothing is copied into the submodule.
 #
@@ -20,8 +20,8 @@ cd "$ROOT"
 [ -f third_party/wadamesh/platformio.ini ] || die "third_party/wadamesh is missing; run: git submodule update --init --recursive"
 remote="$(git -C third_party/wadamesh remote get-url origin 2>/dev/null || true)"
 case "$remote" in
-    *ALLFATHER-BV/wadamesh*) ;;
-    *) die "third_party/wadamesh must be ALLFATHER-BV/wadamesh (found: ${remote:-no remote})" ;;
+    *jade-on-mesh/wadamesh-tak*) ;;
+    *) die "third_party/wadamesh must be jade-on-mesh/wadamesh-tak (found: ${remote:-no remote}); run: git submodule sync third_party/wadamesh" ;;
 esac
 
 # wadamesh carries the app hooks; TactileBrowser makes Lexbor's encoding

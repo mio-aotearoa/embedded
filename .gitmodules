@@ -9,7 +9,7 @@
 	url = https://github.com/facebook/zstd
 [submodule "third_party/wadamesh"]
 	path = third_party/wadamesh
-	url = https://github.com/ALLFATHER-BV/wadamesh
+	url = https://github.com/jade-on-mesh/wadamesh-tak
 [submodule "third_party/neocalculator"]
 	path = third_party/neocalculator
 	url = https://github.com/El-EnderJ/NeoCalculator

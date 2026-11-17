@@ -4,7 +4,7 @@
 
 ```
 third_party/
-  wadamesh/              ALLFATHER-BV/wadamesh      (submodule, pinned; T-Deck firmware)
+  wadamesh/              jade-on-mesh/wadamesh-tak (submodule, pinned; T-Deck firmware)
   zstd/                  facebook/zstd              (submodule, pinned; ZIM clusters)
   esp32-photoframe/      aitjcize/esp32-photoframe  (submodule, pinned)
   ESP32Drop/             s-iwaki-d/ESP32Drop        (submodule, pinned)
@@ -117,8 +117,8 @@ that overflowed DRAM by **613,584 B**. `patches/TactileBrowser/0001` makes every
 table in that generated file `const` (the series applies to the nested Lexbor
 submodule via `patches/TactileBrowser/dir`), which moves them to
 `.flash.rodata`. `.dram0.data` is now 37,672 B and the T-Deck image uses
-**158,168 of 327,680 bytes of RAM (48.3%)** and **6,193,849 of 8,126,464 bytes of
-flash (76.2%)** — about 1.9 MB of flash left for the remaining apps. The pinned
+**149,640 of 327,680 bytes of RAM (45.7%)** and **7,134,249 of 8,126,464 bytes of
+flash (87.8%)** — about 0.95 MB of flash left for the remaining apps. The pinned
 tree's own render tests still pass with the const tables.
 
 **JavaScript.** Inline scripts run on **Duktape 2.7.0 (ES5.1)**, the engine
@@ -337,7 +337,7 @@ time. A sandboxed Nix build has no network and this flake does not vendor a
 PlatformIO cache lives outside the store.
 
 `build.sh` (and the flake builder) assert that `third_party/wadamesh` really is
-`ALLFATHER-BV/wadamesh` before patching, and print the pinned base revision.
+`jade-on-mesh/wadamesh-tak` before patching, and print the pinned base revision.
 
 ## Requested additions and why they are not wired in
 
@@ -464,7 +464,7 @@ has been flashed or run on hardware. What was actually checked:
 
 * The T-Deck env compiles: `nix run .#firmware` finished in 92 s with
   `http_download.cpp`, `esp32ai_app.cpp`, `kiwix_app.cpp` and `zim_reader.cpp`
-  in the build, no compiler warnings from them, and 6,193,849 B of image in the 7.75 MB
+  in the build, no compiler warnings from them, and 7,134,249 B of image in the 7.75 MB
   `factory` slot (no OTA: USB updates only), with `PeriodicApp::launch`,
   `LocalSendApp::launch` and the LocalSend task symbols present (the
   browser renderer is linked in too). `nm` finds `KiwixApp::launch()`,

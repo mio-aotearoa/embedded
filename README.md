@@ -4,7 +4,7 @@ Two ESP32-S3 firmwares, built almost entirely out of pinned upstream projects:
 
 | Firmware | Hardware | What runs | Upstream code |
 |---|---|---|---|
-| [`firmware/tdeck-plus`](firmware/tdeck-plus) | LilyGO T-Deck Plus | wadamesh (MeshCore mesh stack + LVGL touch UI) with a Kiwix ZIM reader from SD | `ALLFATHER-BV/wadamesh` (which pins its MeshCore fork), `facebook/zstd` |
+| [`firmware/tdeck-plus`](firmware/tdeck-plus) | LilyGO T-Deck Plus | wadamesh (MeshCore mesh stack + LVGL touch UI) with a Kiwix ZIM reader from SD | `jade-on-mesh/wadamesh-tak` (which pins its MeshCore fork), `facebook/zstd` |
 | [`firmware/reterminal-e1002`](firmware/reterminal-e1002) | Seeed reTerminal E1002 | esp32-photoframe + AirDrop receive (ESP32Drop) | `aitjcize/esp32-photoframe`, `s-iwaki-d/ESP32Drop` |
 
 Both devices are ESP32-S3 boards with PSRAM, which is what the upstream
@@ -84,8 +84,8 @@ subset, inline scripts on Duktape 2.7.0) while keeping its text view as the
 fallback for pages the layout engine cannot handle.
 Lexbor's legacy encoding tables are `const` through
 `patches/TactileBrowser/`, so ~760 KB of tables live in flash instead of DRAM:
-the image uses **6,193,849 of 8,126,464 bytes of flash (76.2%)** and **158,168 of
-327,680 bytes of RAM (48.3%)**. See
+the image uses **7,134,249 of 8,126,464 bytes of flash (87.8%)** and **149,640 of
+327,680 bytes of RAM (45.7%)**. See
 [`docs/architecture.md`](docs/architecture.md) for the measured before/after.
 
 Browser-engine options (TactileBrowser, eBrowser, Agave) are compared in
@@ -113,7 +113,7 @@ constraints behind each choice, and the known gaps.
 
 ## Building the T-Deck Plus firmware
 
-The base is **ALLFATHER-BV/wadamesh** (`third_party/wadamesh`, pinned by
+The base is **jade-on-mesh/wadamesh-tak** (`third_party/wadamesh`, pinned by
 `.gitmodules`). `firmware/tdeck-plus/build.sh` — which `nix run .#firmware`
 runs — refuses to build if that submodule is not the wadamesh checkout, applies
 `patches/wadamesh`, then runs
