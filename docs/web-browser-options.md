@@ -149,50 +149,50 @@ Nothing in this section is compiled: the shipped browser is the TactileBrowser
 core above. The plan stays because it explains the offscreen-canvas route and the
 DOM milestone the current page still lacks.
 
-## Why none of them drops in
+## Why none of them dropped in as-is
 
-* **No room in the image.** A DOM + CSS layout engine plus a JS engine is
-  hundreds of KB of code and heap; the app slot has ~199 KB. Bringing any of the
-  three in means a new partition table (drop the second OTA slot and/or the map
-  tile cache) or building a *separate* browser firmware instead of an app in
-  wadamesh. That is a variant decision, not an app-page addition.
+* **No room in the stock image.** A DOM + CSS layout engine plus a JS engine is
+  hundreds of KB of code and heap, and the stock app slot had ~199 KB left.
+  Making room meant a new partition table: this build drops the second OTA slot
+  for one 7.75 MB factory slot (USB updates) and keeps the map tile cache, which
+  leaves ~0.95 MB. That was the variant decision this repository made.
 * **LVGL 9 vs 8.3.11.** eBrowser and Agave's example expect LVGL 9. wadamesh's
   UI is built against 8.3.11; upgrading the whole firmware to 9 is a separate,
-  large change. TactileBrowser is the only candidate already rendering through
-  LVGL on an ESP32-S3, but it assumes the Tactility framework's build and APIs.
+  large change. TactileBrowser's core talks to the platform only through a
+  `RenderInterface`, so its Lexbor/CSS/layout layer was compiled in behind an
+  LVGL 8.3 renderer; its Tactility framework and LVGL 9 were not adopted.
 * **Build system.** Only babe32 is an Arduino/PlatformIO project like wadamesh.
-  eBrowser/Agave/TactileBrowser are CMake/IDF trees; each would need a
-  component wrapper and a platform port (display flush, input, TLS, timers).
+  eBrowser and Agave are CMake/IDF trees and would each need a component wrapper
+  and a platform port (display flush, input, TLS, timers). TactileBrowser's core
+  is plain C/C++ and compiles straight through `build_src_filter`.
 * **TLS and proxy reality.** wadamesh has no certificate store. Direct HTTPS to
   most sites works only `setInsecure()`; sites that block embedded clients need
   a proxy (babe32 ships one for exactly this reason). A browser that cannot
   verify certificates is a privacy claim, not a security one.
 
-## Recommendation
+## What was chosen
 
-1. **Ship the Reader as "the browser"** and improve it incrementally (images,
-   simple forms, a readable-mode extraction). It is already integrated, fits,
-   and is the only option with zero porting cost.
-2. **If a real engine is required, try TactileBrowser first.** It is the only
-   candidate that targets ESP32-S3 and renders through LVGL, and Duktape is the
-   smaller JS engine. Expect to either adopt Tactility's framework or extract
-   its Lexbor/CSS/layout layer into a wadamesh app page — and expect LVGL 9.
-3. **eBrowser is the second choice** if the Tactility coupling is unacceptable:
-   C11, MIT, modular, JS off by default, mbedTLS already in the tree. The work
-   is an ESP-IDF/PlatformIO component port plus its LVGL 9 dependency; the
-   claimed ESP32-S3 target is unverified.
-4. **Agave is the most capable and the least practical here.** Full CSS3 and
-   QuickJS need libcurl, FreeType and SQLite, and it has no MCU port; porting it
-   is a project of its own, not an app.
-5. If the goal is "read web pages on the T-Deck" rather than "run a browser
-   engine", babe32's approach (text subset, forms, optional proxy-side images)
-   is the closest fit to the remaining flash and is a better template for
-   extending the Reader than any full engine.
+1. **The Reader is "the browser"**, with TactileBrowser's core merged into it:
+   fetched pages and local `.htm`/`.html` files up to 64 KB are laid out with
+   Lexbor; the text pass is the fallback. One Web tile, one fetch path.
+2. **TactileBrowser's core was extracted, not the project.** Its
+   `RenderInterface` needed only an LVGL 8.3 renderer, an HTTP(S) fetcher and a
+   Duktape bridge (2.7.0, ES5.1, `document.write`/`console.log`), so neither
+   LVGL 9 nor the Tactility framework came along.
+3. **eBrowser was the second choice** — C11, MIT, modular — but would have
+   needed an ESP-IDF/PlatformIO component port plus its LVGL 9 dependency, for
+   a less mature renderer than the one now shipped.
+4. **Agave was the most capable and the least practical:** full CSS3 and QuickJS
+   need libcurl, FreeType and SQLite, and it has no MCU port.
+5. babe32's text-subset approach stays the reference for what a *fallback* text
+   pass should keep; the shipped page outgrew it.
 
 ## Verification status
 
-Read from each project's README, site and source layout on 2026-11-17. No
-candidate was built or linked into the firmware, so none of their flash/RAM
-figures are measured here; the ~199 KB headroom is from this repository's own
-build (3,859,664 B image against a 3,875 MB app partition). Before committing to
-one, build it for `esp32s3` first and measure the image and steady-state heap.
+The engine survey was read from each project's README, site and source layout on
+2026-11-17. Only TactileBrowser was built: its core is linked in, and the image
+measures **7,134,277 B of 8,126,464** (87.8% of the 7.75 MB slot) with
+**149,640 B of RAM**. The JS layer and the ZIM parser have host tests, and
+`nix run .#firmware` builds the device image. eBrowser, Agave and babe32 were not
+built, so their figures remain claims. The shipped page has not yet been
+exercised on hardware for scroll smoothness.
