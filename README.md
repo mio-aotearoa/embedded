@@ -58,20 +58,38 @@ file to photoframe's own display flow.
 See [`docs/architecture.md`](docs/architecture.md) for the details, the
 constraints behind each choice, and the known gaps.
 
-## Building the T-Deck firmware
+## Building the T-Deck Plus firmware
 
 The base is **ALLFATHER-BV/wadamesh** (`third_party/wadamesh`, pinned by
-`.gitmodules`); `firmware/tdeck-plus/build.sh` refuses to build if that
-submodule is not the wadamesh checkout. Two entry points:
+`.gitmodules`). `firmware/tdeck-plus/build.sh` — which `nix run .#firmware`
+runs — refuses to build if that submodule is not the wadamesh checkout, applies
+`patches/wadamesh`, then runs
+`pio run -e LilyGo_TDeck_companion_radio_touch`.
+
+Prerequisites: the submodules, and network access on the first build, because
+PlatformIO downloads the espressif32 platform, the Xtensa toolchain and
+wadamesh's `lib_deps` into `.platformio/`.
 
 ```bash
-# plain Nix: build the firmware (network needed: PlatformIO downloads the
-# espressif32 platform, Xtensa toolchain and libraries)
-nix run .#firmware            # == firmware/tdeck-plus/build.sh
-
-# or with the toolchain in a shell
 git submodule update --init --recursive
+
+# PlatformIO and the toolchain from the Nix store; extra args go to pio run
+nix run .#firmware
+nix run .#firmware -- -t upload
+
+# or with the toolchain already on PATH
 nix develop -c firmware/tdeck-plus/build.sh
+firmware/tdeck-plus/build.sh -t upload
+PIOENV=<wadamesh env> firmware/tdeck-plus/build.sh
+```
+
+The images are written to `third_party/out/` (wadamesh's `merge-bin.py` copies
+them there from `third_party/wadamesh/out/`), named after the PlatformIO env,
+with a timestamped copy beside them:
+
+```
+third_party/out/LilyGo_TDeck_companion_radio_touch.bin
+third_party/out/LilyGo_TDeck_companion_radio_touch-<stamp>-<sha>.bin
 ```
 
 `nix build` itself is hermetic (no network in the Nix sandbox), so it builds
