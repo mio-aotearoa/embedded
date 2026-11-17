@@ -14,6 +14,7 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 
 // Writes the completed URL into `out`. Returns false only when the result does
 // not fit, so a truncated host is never fetched by accident.
@@ -31,12 +32,14 @@ inline bool urlComplete(const char *in, char *out, size_t cap)
     }
     if (len >= cap) return false;
 
-    const bool http = len >= 7 && strncmp(in, "http://", 7) == 0;
-    const bool https = len >= 8 && strncmp(in, "https://", 8) == 0;
-    if (http || https)
+    // The scheme match is case-insensitive and the result is normalised, so a
+    // typed "HTTPS://host" is not handed on as an unknown scheme.
+    const bool https = len >= 8 && strncasecmp(in, "https://", 8) == 0;
+    const bool http = !https && len >= 7 && strncasecmp(in, "http://", 7) == 0;
+    if (https || http)
     {
-        memcpy(out, in, len);
-        out[len] = '\0';
+        const size_t skip = https ? 8 : 7;
+        snprintf(out, cap, "%s%.*s", https ? "https://" : "http://", (int)(len - skip), in + skip);
         return true;
     }
 
