@@ -14,6 +14,7 @@
 #include "http_download.h"  // Wi-Fi -> SD downloader shared with the ESP-AI page
 #include "i18n.h"        // TR()
 #include "ime_ja.h"     // romaji -> kana in wadamesh's typing path
+#include "url_util.h"   // bare host -> https://
 #include "zim_reader.h"  // ZIM v5/v6 parser (this folder)
 #include "src/extra/libs/sjpg/tjpgd.h"  // wadamesh's JPEG decoder (same copy UITask uses)
 
@@ -715,7 +716,19 @@ void KiwixApp::urlReadyCb(lv_event_t* e)
 {
     (void)e;
     if (!s_active || !s_active->url_) return;
-    s_active->startDownload(lv_textarea_get_text(s_active->url_));
+    char full[256];
+    if (!urlComplete(lv_textarea_get_text(s_active->url_), full, sizeof full))
+    {
+        s_active->setStatus(TR("That URL is too long"));
+        return;
+    }
+    if (strncmp(full, "http://", 7) != 0 && strncmp(full, "https://", 8) != 0)
+    {
+        s_active->setStatus(TR("Only http:// and https:// URLs are supported"));
+        return;
+    }
+    lv_textarea_set_text(s_active->url_, full);
+    s_active->startDownload(full);
 }
 
 void KiwixApp::urlCancelCb(lv_event_t* e)

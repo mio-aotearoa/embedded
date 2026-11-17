@@ -11,6 +11,7 @@
 
 #include "AppPage.h"
 #include "i18n.h"
+#include "url_util.h"   // bare host -> https://
 #include "ime_ja.h"
 #include "tactilebrowser_core.h"
 #include "js_engine.h"
@@ -224,7 +225,7 @@ bool BrowserApp::open(void)
     lv_obj_set_pos(ta_, 4, top);
     lv_textarea_set_one_line(ta_, true);
     lv_textarea_set_max_length(ta_, 255);
-    lv_textarea_set_placeholder_text(ta_, "http://...");
+    lv_textarea_set_placeholder_text(ta_, "example.com");
     lv_obj_add_event_cb(ta_, taCb, LV_EVENT_ALL, nullptr);
 
     lv_obj_t *go = lv_btn_create(root_);
@@ -286,8 +287,16 @@ void BrowserApp::setStatus(const char *msg)
 
 void BrowserApp::navigate(const char *url)
 {
-    if (!url || !url[0]) return;
-    if (strncmp(url, "http://", 7) != 0 && strncmp(url, "https://", 8) != 0)
+    // Typing a bare host ("example.com") means https: that is what the firmware
+    // can fetch, and it is what an address bar is expected to assume.
+    char full[256];
+    if (!urlComplete(url, full, sizeof full))
+    {
+        setStatus(TR("That URL is too long"));
+        return;
+    }
+    if (!full[0]) return;
+    if (strncmp(full, "http://", 7) != 0 && strncmp(full, "https://", 8) != 0)
     {
         setStatus(TR("Only http:// and https:// URLs are supported"));
         return;
@@ -304,8 +313,8 @@ void BrowserApp::navigate(const char *url)
     }
 
     memset((void *)&s_fetch, 0, sizeof s_fetch);
-    snprintf(s_fetch.url, sizeof s_fetch.url, "%s", url);
-    if (ta_) lv_textarea_set_text(ta_, url);
+    snprintf(s_fetch.url, sizeof s_fetch.url, "%s", full);
+    if (ta_) lv_textarea_set_text(ta_, full);   // show what is actually fetched
     s_fetch.running = true;
     setStatus(TR("Loading..."));
 

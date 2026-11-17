@@ -9,6 +9,7 @@
 #include "AppPage.h"
 #include "http_download.h"
 #include "i18n.h"
+#include "url_util.h"   // bare host -> https://
 #include "ime_ja.h"
 
 #include <Arduino.h>
@@ -115,7 +116,7 @@ bool DownloadApp::open(void)
     lv_obj_set_pos(ta_, 4, bar + 2);
     lv_textarea_set_one_line(ta_, true);
     lv_textarea_set_max_length(ta_, 255);
-    lv_textarea_set_placeholder_text(ta_, "https://...");
+    lv_textarea_set_placeholder_text(ta_, "example.com/file.bin");
     lv_obj_add_event_cb(ta_, taCb, LV_EVENT_ALL, nullptr);
 
     getBtn_ = lv_btn_create(root_);
@@ -249,8 +250,19 @@ void DownloadApp::downloadCb(lv_event_t *e)
 {
     (void)e;
     if (!s_active || !s_active->ta_) return;
-    const char *url = lv_textarea_get_text(s_active->ta_);
-    s_active->startUrl(url, kGeneralDir, nullptr);
+    char full[256];
+    if (!urlComplete(lv_textarea_get_text(s_active->ta_), full, sizeof full))
+    {
+        s_active->setStatus(TR("That URL is too long"));
+        return;
+    }
+    if (strncmp(full, "http://", 7) != 0 && strncmp(full, "https://", 8) != 0)
+    {
+        s_active->setStatus(TR("Only http:// and https:// URLs are supported"));
+        return;
+    }
+    lv_textarea_set_text(s_active->ta_, full);
+    s_active->startUrl(full, kGeneralDir, nullptr);
 }
 
 void DownloadApp::cancelCb(lv_event_t *e)
