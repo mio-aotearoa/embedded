@@ -14,6 +14,7 @@
 #include "url_util.h"   // bare host -> https://
 #include "ime_ja.h"
 #include "tactilebrowser_core.h"
+#include "web_enhance.h"
 #include "js_engine.h"
 
 #include <Arduino.h>
@@ -44,6 +45,11 @@ struct FetchState
 };
 
 FetchState s_fetch = {};
+
+// Set while a page rendered OUTSIDE this app (wadamesh's built-in Web page) is on
+// screen: the renderer's link buttons then hand the address to that page instead
+// of to BrowserApp, which is not open in that case.
+void (*s_into_link_cb)(const char*) = nullptr;
 
 // ---- renderer -------------------------------------------------------------
 
@@ -525,6 +531,7 @@ void BrowserApp::linkCb(lv_event_t *e)
     // the tree here would delete the widget that is still dispatching.
     appPageBindTextField(nullptr);   // following a link is not typing
     if (s_active) s_active->navigate(url);
+    else if (s_into_link_cb) s_into_link_cb(url);   // built-in Web page owns the page
 }
 
 void BrowserApp::tickCb(lv_timer_t *)
@@ -547,4 +554,25 @@ void BrowserApp::tickCb(lv_timer_t *)
         s_fetch.done = false;
         app->setStatus(s_fetch.err[0] ? s_fetch.err : TR("The page could not be loaded"));
     }
+}
+
+bool browserRenderInto(lv_obj_t* parent, const char* url, const char* html, size_t len,
+                       void (*on_link)(const char*))
+{
+    if (!parent || !html || len == 0) return false;
+    if (!tactilebrowser_core_init()) return false;
+    tactilebrowser_set_renderer(&s_iface);
+
+    // Inline scripts first, exactly as this app does: document.write() output is
+    // what gets laid out.
+    size_t scriptedLen = 0;
+    char* scripted = browserJsApplyScripts(html, len, &scriptedLen);
+    const char* doc = scripted ? scripted : html;
+    const size_t docLen = scripted ? scriptedLen : len;
+
+    s_into_link_cb = on_link;
+    const RenderResult result = tactilebrowser_render_html_string(
+        url ? url : "", doc, docLen, parent, lv_obj_get_width(parent), 4000);
+    free(scripted);
+    return result == RENDER_SUCCESS;
 }
