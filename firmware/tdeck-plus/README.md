@@ -90,10 +90,12 @@ applied automatically; `./scripts/patches.sh status wadamesh` shows it.
 
 ## Limitations
 
-* Text/HTML articles only. A ZIM article is opened from the card, so it gets the
-  Reader's text pass, which drops images, CSS and tables (fetched `http(s)` pages
-  go through the Lexbor renderer instead); full-text (Xapian) search is not used — search is the ZIM title
-  index, so it matches title prefixes only.
+* Text/HTML articles only. Articles up to 64 KB are laid out by the Lexbor
+  renderer — the same one fetched pages use — so headings, colours and the CSS
+  subset apply; larger articles fall back to the Reader's text pass, which drops
+  images, CSS and tables. The renderer does not decode images at all (the first
+  image is shown separately before the article). Full-text (Xapian) search is not
+  used — search is the ZIM title index, so it matches title prefixes only.
 * LZMA2/XZ clusters (pre-libzim-8 archives) are rejected with a message; those
   archives need re-exporting with zstd.
 * Articles larger than 220 KB are refused rather than truncated.

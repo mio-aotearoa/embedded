@@ -50,7 +50,8 @@ table instead of the fork's dual 4.5 MB slots.
   and the pinned zstd decompressor into the env, plus `-D WADAMESH_KIWIX=1` and
   `-D WADAMESH_ESP32AI=1` so every hook is compiled only in that env. No
   wadamesh source is modified in substance: the Reader's fetch follows redirects
-  and hands fetched markup to our renderer, and the hardware-keyboard path routes
+  and hands fetched markup to our renderer, local `.htm`/`.html` files (the Kiwix
+  article) are laid out by it too, and the hardware-keyboard path routes
   characters into app-page fields. Removing the series restores the upstream tree
   exactly.
 
