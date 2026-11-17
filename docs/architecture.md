@@ -143,6 +143,15 @@ Two properties are deliberate:
 * Multiple archives open at once, and archives above the PSRAM/parse limits.
 * `LZMA2`/`XZ` clusters; those archives need re-exporting with zstd.
 
+### Web browser options
+
+The T-Deck ships a text browser (wadamesh's Reader) but no layout engine. The
+engines that could change that — TactileBrowser, eBrowser, Agave — and what each
+would cost in flash, build integration and LVGL version are compared in
+[`web-browser-options.md`](web-browser-options.md). The short version: none fits
+the ~199 KB left in the app slot, so a real engine is a partition-table/variant
+decision, not an app-page addition.
+
 ## Firmware 2 — reTerminal E1002: photoframe + AirDrop
 
 ### The radio is the constraint

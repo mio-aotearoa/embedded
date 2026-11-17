@@ -57,6 +57,9 @@ weights from a flash mapping, and the 14.9 MB model does not fit this board's
 flash layout, so the page manages the assets and says that generation needs the
 runtime port.
 
+Browser-engine options (TactileBrowser, eBrowser, Agave) are compared in
+[`docs/web-browser-options.md`](docs/web-browser-options.md).
+
 **reTerminal E1002** — esp32-photoframe owns boot, storage, image pipeline and
 deep sleep. An ESP-IDF component (`components/airdrop_bridge`) compiles
 ESP32Drop's receive path unmodified behind a small `Arduino.h` shim
