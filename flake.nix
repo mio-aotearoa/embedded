@@ -161,7 +161,7 @@
         host-tests = self.packages.${pkgs.system}.host-tests;
       });
 
-      formatter = forAllSystems (pkgs: pkgs.nixfmt-rfc-style);
+      formatter = forAllSystems (pkgs: pkgs.nixfmt);
 
     };
 }
