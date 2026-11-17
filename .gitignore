@@ -9,3 +9,6 @@ third_party/wadamesh/out/
 # Nix
 result
 result-*
+
+# ESP-IDF / PlatformIO build trees
+build/
