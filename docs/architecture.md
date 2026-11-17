@@ -95,6 +95,43 @@ the firmware's mount policy or open-file budget.
 * wadamesh's Reader is the reuse that fits: same panel, same fonts, same
   keyboard/trackball policy, already shipping.
 
+### Browser — TactileBrowser's core, verified on the host, not yet in the image
+
+**Status: the engine is reused and proven, the firmware link does not fit yet.**
+`third_party/TactileBrowser` is pinned; its core and all 203 Lexbor C files
+compile and link on the host (3.5 MB host binary), and its own render test
+binary builds. On the device the same sources overflow DRAM by **613,584 B**:
+Lexbor's legacy multibyte encoding tables (`lxb_encoding_multi_*_map`, JIS0208,
+Big5, EUC-KR, GB18030) are 760 KB of *initialized writable* data, and the S3 has
+no DRAM for that. Marking those tables `const` moved them to flash and cut the
+overflow to **270,176 B**, still too much, so the browser is **not in the build**
+(`WADAMESH_BROWSER` is off and `firmware/tdeck-plus/browser/` is not compiled).
+The next step is a patch series that places the remaining read-only tables in
+flash/PSRAM instead of a per-file experiment.
+
+`third_party/TactileBrowser`'s core is reused, not reimplemented. The reason it drops in without the LVGL 9 problem the survey
+found: the core contains **no `lv_*` calls at all**. It parses HTML and CSS with
+Lexbor and renders through a `RenderInterface` of function pointers
+(`create_label`, `create_button`, `set_bg_gradient`, `register_link_handler`, …),
+so the only platform code is the renderer and the fetcher.
+
+`firmware/tdeck-plus/browser/` is that platform code: an LVGL 8.3 implementation
+of every callback (wrapping labels, buttons, text inputs/areas, transparent
+containers, colours, gradients, text alignment, clickable links) plus an
+HTTP(S) fetcher on its own task (redirects followed, TLS `setInsecure()` like the
+Reader, 16 KB page cap, freed after rendering). The page has a URL bar, Go, the
+on-screen keyboard, a scrolling white page view and a status line; links inside
+the page navigate.
+
+What the host build covers: the core parses HTML/CSS and drives the render
+interface; the LVGL 8.3 renderer in `firmware/tdeck-plus/browser/` is written but
+has not been linked or run on the panel, so no claim is made about its output.
+
+What does not: **JavaScript**. The core has no JS engine and neither does this,
+so scripts are ignored; Duktape behind the same render interface is the next
+step, not something that is half-wired. There is also no external stylesheet
+support beyond what the core's downloader hook does, and no images.
+
 ### On-device downloader
 
 `firmware/tdeck-plus/downloader/` is a page, not a second transport: it fills in

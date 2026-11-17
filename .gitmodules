@@ -16,3 +16,6 @@
 [submodule "third_party/lvgl_pinyin_ime"]
 	path = third_party/lvgl_pinyin_ime
 	url = https://github.com/VanillaNahida/lvgl_pinyin_ime
+[submodule "third_party/TactileBrowser"]
+	path = third_party/TactileBrowser
+	url = https://github.com/NellowTCS/TactileBrowser

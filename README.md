@@ -75,6 +75,12 @@ implementations are Rust/Go/Win32), so this is our own protocol v2 client: peer
 discovery, `prepare-upload`, a streamed `upload`, and `cancel` on failure. It
 sends over plain HTTP and does not receive.
 
+The browser reuses TactileBrowser's `tactilebrowser_core` (Lexbor) from a pinned
+submodule and has an LVGL 8.3 platform layer written, but it is **not in the
+image yet**: Lexbor's legacy encoding tables overflow the S3's DRAM (613,584 B;
+270,176 B even after a `const` experiment). See
+[`docs/architecture.md`](docs/architecture.md) for the measured blocker.
+
 Browser-engine options (TactileBrowser, eBrowser, Agave) are compared in
 [`docs/web-browser-options.md`](docs/web-browser-options.md), which also covers
 what the Reader can do (no CSS, no JavaScript) and

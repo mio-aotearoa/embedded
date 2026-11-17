@@ -88,9 +88,27 @@ DOM/CSS/JS engine. It removes the "there is no room at all" objection, which is
 why the engine work below is worth doing against this table rather than the
 current one.
 
-## Where the browser work starts
+## What was actually built: TactileBrowser's core
 
-The three candidates above are all LVGL 9 renderers. The route that does not
+The survey above assumed every candidate brought its renderer. TactileBrowser
+does not: its `tactilebrowser_core` is a Lexbor-based HTML/CSS/layout engine
+with **zero LVGL calls** — rendering goes through a `RenderInterface` table. So
+its *engine* is reused as a pinned submodule (`third_party/TactileBrowser`) and
+only the renderer is ours (`firmware/tdeck-plus/browser/`, LVGL 8.3 widgets).
+That is the state of the work: the engine and its core compile on the host, the
+LVGL 8.3 platform layer is written, but the firmware link overflows DRAM by
+**613,584 B** on Lexbor's legacy multibyte encoding tables (760 KB of writable
+initialized data). Making them `const` moved them to flash and only reduced the
+overflow to **270,176 B**, so the browser is not in the image yet; placing those
+tables in flash/PSRAM through a patch series is the blocking task. The page
+would offer URL entry, fetch, HTML/CSS render and clickable links, with no
+JavaScript.
+
+The litehtml + Duktape plan below remains the alternative route if the engine's
+CSS coverage proves too thin; it is kept because it explains the drawing/canvas
+approach and the JS milestone that the current page still lacks:
+
+The candidates above are all LVGL 9 renderers. The route that does not
 require moving wadamesh off LVGL 8.3 is to keep the engine's pixels out of
 LVGL's object tree entirely:
 
