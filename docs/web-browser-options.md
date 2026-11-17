@@ -35,7 +35,7 @@ new flash.
   has to move.
 * **Flash:** this build now uses `firmware/tdeck-plus/partitions_tdeck_browser.csv`:
   one 7.75 MB `factory` app slot (0x7C0000), no OTA. The image with Kiwix,
-  ESP-AI, LocalSend and the periodic table is **3,879,317 B** — **47.7 %** of
+  ESP-AI, LocalSend and the periodic table is **3,882,469 B** — **47.8 %** of
   the slot, about **4 MB free**. The table below shows the alternatives, and
   why the old 3.875 MB figure is gone.
 * **RAM:** 512 KB internal SRAM + 8 MB PSRAM. The S3 has no MMU, and QuickJS or

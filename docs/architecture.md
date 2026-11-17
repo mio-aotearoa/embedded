@@ -422,7 +422,7 @@ has been flashed or run on hardware. What was actually checked:
 
 * The T-Deck env compiles: `nix run .#firmware` finished in 92 s with
   `http_download.cpp`, `esp32ai_app.cpp`, `kiwix_app.cpp` and `zim_reader.cpp`
-  in the build, no compiler warnings from them, and 3,879,317 B of image in the 7.75 MB
+  in the build, no compiler warnings from them, and 3,882,469 B of image in the 7.75 MB
   `factory` slot (no OTA: USB updates only), with `PeriodicApp::launch`,
   `LocalSendApp::launch` and the LocalSend task symbols present (the
   app partition is 3.875 MB). `nm` finds `KiwixApp::launch()`,
