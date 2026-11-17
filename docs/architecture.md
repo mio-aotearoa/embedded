@@ -117,8 +117,8 @@ that overflowed DRAM by **613,584 B**. `patches/TactileBrowser/0001` makes every
 table in that generated file `const` (the series applies to the nested Lexbor
 submodule via `patches/TactileBrowser/dir`), which moves them to
 `.flash.rodata`. `.dram0.data` is now 37,672 B and the T-Deck image uses
-**157,872 of 327,680 bytes of RAM (48.2%)** and **6,180,493 of 8,126,464 bytes of
-flash (76.1%)** — about 1.9 MB of flash left for the remaining apps. The pinned
+**158,168 of 327,680 bytes of RAM (48.3%)** and **6,193,849 of 8,126,464 bytes of
+flash (76.2%)** — about 1.9 MB of flash left for the remaining apps. The pinned
 tree's own render tests still pass with the const tables.
 
 **JavaScript.** Inline scripts run on **Duktape 2.7.0 (ES5.1)**, the engine
@@ -464,10 +464,10 @@ has been flashed or run on hardware. What was actually checked:
 
 * The T-Deck env compiles: `nix run .#firmware` finished in 92 s with
   `http_download.cpp`, `esp32ai_app.cpp`, `kiwix_app.cpp` and `zim_reader.cpp`
-  in the build, no compiler warnings from them, and 3,882,469 B of image in the 7.75 MB
+  in the build, no compiler warnings from them, and 6,193,849 B of image in the 7.75 MB
   `factory` slot (no OTA: USB updates only), with `PeriodicApp::launch`,
   `LocalSendApp::launch` and the LocalSend task symbols present (the
-  app partition is 3.875 MB). `nm` finds `KiwixApp::launch()`,
+  browser renderer is linked in too). `nm` finds `KiwixApp::launch()`,
   `Esp32AiApp::launch()`, `ZimArchive::searchTitles()` and
   `httpDownloadStart()` in the ELF.
 

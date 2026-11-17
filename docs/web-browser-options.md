@@ -38,8 +38,8 @@ new flash.
   has to move.
 * **Flash:** this build now uses `firmware/tdeck-plus/partitions_tdeck_browser.csv`:
   one 7.75 MB `factory` app slot (0x7C0000), no OTA. The image with Kiwix,
-  ESP-AI, LocalSend and the periodic table is **3,882,469 B** — **47.8 %** of
-  the slot, about **4 MB free**. The table below shows the alternatives, and
+  ESP-AI, LocalSend, the periodic table and the web renderer is **6,193,849 B** —
+  **76.2 %** of the slot, about **1.9 MB free**. The table below shows the alternatives, and
   why the old 3.875 MB figure is gone.
 * **RAM:** 512 KB internal SRAM + 8 MB PSRAM. The S3 has no MMU, and QuickJS or
   a Lexbor DOM is a heap consumer; PSRAM latency is also where LVGL already
@@ -102,8 +102,8 @@ the fetcher and the JS bridge are ours (`firmware/tdeck-plus/browser/`).
 It is in the shipping image. The blocker was Lexbor's legacy encoding tables
 (~760 KB of writable initialized data, 613,584 B of DRAM overflow); making every
 table in `encoding/multi.c` `const` through `patches/TactileBrowser/` moves them
-to flash. The T-Deck image uses **157,872 / 327,680 B of RAM (48.2%)** and
-**6,180,493 / 8,126,464 B of flash (76.1%)**.
+to flash. The T-Deck image uses **158,168 / 327,680 B of RAM (48.3%)** and
+**6,193,849 / 8,126,464 B of flash (76.2%)**.
 
 A page gets: URL entry, fetch (redirects followed, TLS `setInsecure()`), HTML
 parsing, the core's CSS subset (tag/class/id selectors, box model, colours,
