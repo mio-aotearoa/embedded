@@ -1,17 +1,17 @@
 /* Host test for the browser's JavaScript layer (firmware/tdeck-plus/browser/
- * js_engine.cpp), built against the pinned Elk engine.
+ * js_engine.cpp), built against the pinned Duktape 2.7.0 amalgamation.
  *
  * Covers what the device path actually uses: a script whose document.write()
  * output replaces the <script> block, console.log() reaching the status line,
  * plain pages passing through untouched, and external scripts being skipped
  * while the rest of the markup survives.
  *
- * Build:
- *   g++ -std=gnu++17 -I firmware/tdeck-plus/browser
- *       -I third_party/TactileBrowser/tactilebrowser_core/elk
+ * Run: nix build .#host-tests (hermetic; the binary is $out/bin/test_browser_js).
+ * A manual build needs build/duktape/ from scripts/duktape.sh:
+ *   g++ -std=gnu++17 -I firmware/tdeck-plus/browser -I build/duktape
  *       firmware/tdeck-plus/test/host/test_browser_js.cpp
  *       firmware/tdeck-plus/browser/js_engine.cpp
- *       third_party/TactileBrowser/tactilebrowser_core/elk/elk.c -o /tmp/tjs
+ *       build/duktape/duktape.c -o /tmp/tjs -lm
  */
 #include <stdio.h>
 #include <stdlib.h>

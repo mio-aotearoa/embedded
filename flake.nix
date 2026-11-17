@@ -6,7 +6,7 @@
 # libraries from the PlatformIO registry, and a sandboxed build has no network.
 # So the flake exposes:
 #
-#   nix build              hermetic host test of the ZIM parser (no network)
+#   nix build              hermetic host tests: ZIM parser, browser JS, AirDrop
 #   nix run .#firmware     build the real firmware (network, uses PlatformIO)
 #   nix develop            same toolchain as `nix run .#firmware`, interactive
 #
@@ -23,6 +23,13 @@
       url = "github:facebook/zstd/f8745da6ff1ad1e7bab384bd1f9d742439278e99";
       flake = false;
     };
+    # Duktape's git repo ships raw sources only, and the amalgamation is what the
+    # firmware builds against. This is the same 2.7.0 tarball scripts/duktape.sh
+    # pins by SHA-256 for the device build, so the host test runs the same engine.
+    duktape = {
+      url = "https://duktape.org/duktape-2.7.0.tar.xz";
+      flake = false;
+    };
   };
 
   outputs =
@@ -30,6 +37,7 @@
       self,
       nixpkgs,
       zstd,
+      duktape,
       ...
     }:
     let
@@ -76,15 +84,27 @@
                 firmware/reterminal-e1002/companion/test/test_airdrop_companion.cpp \
                 build/obj/airdrop_companion.o -o build/test_airdrop_companion
               ./build/test_airdrop_companion
+              DUK=$(find ${duktape} -name duktape.c -path '*/src/duktape.c' | head -1)
+              if [ -z "$DUK" ]; then
+                echo "error: duktape.c not found in the pinned Duktape input" >&2
+                exit 1
+              fi
+              g++ -std=gnu++17 -O1 -Wall -Wextra \
+                -I firmware/tdeck-plus/browser -I "$(dirname "$DUK")" \
+                firmware/tdeck-plus/test/host/test_browser_js.cpp \
+                firmware/tdeck-plus/browser/js_engine.cpp \
+                "$DUK" -o build/test_browser_js -lm
+              ./build/test_browser_js
               runHook postBuild
             '';
             installPhase = ''
               mkdir -p $out/bin
               cp build/test_zim_archive $out/bin/
               cp build/test_airdrop_companion $out/bin/
+              cp build/test_browser_js $out/bin/
             '';
             meta = with pkgs.lib; {
-              description = "ZIM parser host test (hermetic)";
+              description = "T-Deck host tests: ZIM parser, browser JS, AirDrop (hermetic)";
               license = licenses.gpl3Plus;
               platforms = platforms.linux;
             };
