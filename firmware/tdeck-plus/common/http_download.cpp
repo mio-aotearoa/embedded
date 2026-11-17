@@ -55,47 +55,87 @@ void downloadTask(void *)
     }
 
     HTTPClient http;
-    http.setReuse(false);
-    http.setConnectTimeout(15000);
-    http.setTimeout(30000);
-    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-    http.setUserAgent("wadamesh-tdeck");
-
     WiFiClientSecure tls;
     WiFiClient plain;
-    const bool https = strncmp(s_url, "https://", 8) == 0;
-    bool began = false;
-    if (https)
-    {
-        tls.setInsecure();  // no cert store on the device; see docs/architecture.md
-        began = http.begin(tls, s_url);
-    }
-    else
-    {
-        began = http.begin(plain, s_url);
-    }
-    if (!began)
-    {
-        setError("cannot parse the URL");
-        finish(false);
-        vTaskDelete(nullptr);
-        return;
-    }
+    char current[320];
+    snprintf(current, sizeof current, "%s", s_url);
+    int length = 0;
 
-    http.addHeader("Accept-Encoding", "identity");
-    const int code = http.GET();
-    s_state.http_code = code;
-    if (code != HTTP_CODE_OK)
+    // Follow redirects by hand. Both hosts this firmware pulls from (Hugging
+    // Face, the Kiwix mirror) 302 to a DIFFERENT host, and HTTPClient cannot
+    // re-connect a caller-supplied WiFiClientSecure across hosts: its own
+    // redirect following aborts with HTTP -1 ("connection refused"), which is
+    // exactly what the ESP-AI model download was reporting.
+    for (int hop = 0;; ++hop)
     {
-        snprintf(s_state.err, sizeof s_state.err, "HTTP %d", code);
-        http.end();
-        finish(false);
-        vTaskDelete(nullptr);
-        return;
-    }
+        http.setReuse(false);
+        http.setConnectTimeout(15000);
+        http.setTimeout(30000);
+        http.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
+        http.setUserAgent("wadamesh-tdeck");
 
-    const int length = http.getSize();
-    s_state.total = length > 0 ? (uint64_t)length : 0;
+        const bool https = strncmp(current, "https://", 8) == 0;
+        bool began = false;
+        if (https)
+        {
+            tls.setInsecure();  // no cert store on the device; see docs/architecture.md
+            began = http.begin(tls, current);
+        }
+        else
+        {
+            began = http.begin(plain, current);
+        }
+        if (!began)
+        {
+            setError("cannot parse the URL");
+            finish(false);
+            vTaskDelete(nullptr);
+            return;
+        }
+
+        http.addHeader("Accept-Encoding", "identity");
+        const int code = http.GET();
+        s_state.http_code = code;
+        if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308)
+        {
+            String loc = http.header("Location");
+            http.end();
+            if (!loc.length() || hop >= 4)
+            {
+                setError(loc.length() ? "too many redirects" : "redirect without a Location");
+                finish(false);
+                vTaskDelete(nullptr);
+                return;
+            }
+            if (loc.startsWith("http"))
+            {
+                snprintf(current, sizeof current, "%s", loc.c_str());
+            }
+            else
+            {
+                // Relative Location: resolve against the host we just talked to.
+                const char* scheme = strstr(current, "://");
+                const char* slash = scheme ? strchr(scheme + 3, '/') : nullptr;
+                const size_t base = slash ? (size_t)(slash - current) : strlen(current);
+                char next[320];
+                snprintf(next, sizeof next, "%.*s%s", (int)base, current, loc.c_str());
+                snprintf(current, sizeof current, "%s", next);
+            }
+            continue;
+        }
+        if (code != HTTP_CODE_OK)
+        {
+            snprintf(s_state.err, sizeof s_state.err, "HTTP %d (%s)", code,
+                     HTTPClient::errorToString(code).c_str());
+            http.end();
+            finish(false);
+            vTaskDelete(nullptr);
+            return;
+        }
+        length = http.getSize();
+        s_state.total = length > 0 ? (uint64_t)length : 0;
+        break;
+    }
 
     File out = SD.open(s_tmp, FILE_WRITE);
     if (!out)

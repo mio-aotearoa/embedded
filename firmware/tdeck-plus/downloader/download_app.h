@@ -33,7 +33,6 @@ class DownloadApp
 
     lv_obj_t *root_ = nullptr;
     lv_obj_t *ta_ = nullptr;
-    lv_obj_t *kb_ = nullptr;
     lv_obj_t *list_ = nullptr;
     lv_obj_t *status_ = nullptr;
     lv_obj_t *getBtn_ = nullptr;

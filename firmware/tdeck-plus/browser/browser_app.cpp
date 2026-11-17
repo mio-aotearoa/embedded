@@ -11,6 +11,7 @@
 
 #include "AppPage.h"
 #include "i18n.h"
+#include "ime_ja.h"
 #include "tactilebrowser_core.h"
 #include "js_engine.h"
 
@@ -243,6 +244,7 @@ bool BrowserApp::open(void)
     lv_obj_set_style_pad_all(view_, 6, LV_PART_MAIN);
     lv_obj_set_style_border_width(view_, 0, LV_PART_MAIN);
     lv_obj_set_scroll_dir(view_, LV_DIR_VER);
+    lv_obj_add_event_cb(view_, viewCb, LV_EVENT_CLICKED, nullptr);
 
     status_ = lv_label_create(root_);
     lv_obj_set_width(status_, w - 8);
@@ -250,10 +252,9 @@ bool BrowserApp::open(void)
     lv_obj_set_style_text_color(status_, lv_color_hex(0x9AA4AE), LV_PART_MAIN);
     lv_label_set_long_mode(status_, LV_LABEL_LONG_WRAP);
 
-    kb_ = lv_keyboard_create(root_);
-    lv_obj_set_size(kb_, w, 110);
-    lv_obj_align(kb_, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_add_flag(kb_, LV_OBJ_FLAG_HIDDEN);
+    // No on-screen keyboard: the T-Deck has a physical one. Binding the field
+    // makes wadamesh's key handler type straight into it.
+    appPageBindTextField(ta_);
 
     setStatus(TR("Enter a URL"));
     timer_ = lv_timer_create(tickCb, 200, nullptr);
@@ -269,11 +270,11 @@ void BrowserApp::close(void)
         timer_ = nullptr;
     }
     tactilebrowser_core_cleanup();
+    appPageBindTextField(nullptr);      // the field is about to be deleted
     appPageEnd(&BrowserApp::dismiss);
     appPageDeleteRootAsync(root_);
     root_ = nullptr;
     ta_ = nullptr;
-    kb_ = nullptr;
     view_ = nullptr;
     status_ = nullptr;
 }
@@ -430,23 +431,34 @@ void BrowserApp::taCb(lv_event_t *e)
     if (!s_active) return;
     BrowserApp *app = s_active;
     const lv_event_code_t code = lv_event_get_code(e);
-    if (code == LV_EVENT_FOCUSED)
+    if (code == LV_EVENT_LONG_PRESSED)
     {
-        if (app->kb_)
-        {
-            lv_keyboard_set_textarea(app->kb_, app->ta_);
-            lv_obj_clear_flag(app->kb_, LV_OBJ_FLAG_HIDDEN);
-        }
+        // Japanese extension lives in wadamesh's typing path; toggle it per field.
+        imeJaToggle();
+        app->setStatus(imeJaActive() ? TR("Japanese: romaji, Space = kana")
+                                     : TR("Enter a URL"));
         return;
     }
-    if (code == LV_EVENT_DEFOCUSED || code == LV_EVENT_READY || code == LV_EVENT_CANCEL)
+    if (code == LV_EVENT_FOCUSED || code == LV_EVENT_CLICKED)
     {
-        if (app->kb_)
-        {
-            lv_keyboard_set_textarea(app->kb_, nullptr);
-            lv_obj_add_flag(app->kb_, LV_OBJ_FLAG_HIDDEN);
-        }
+        appPageBindTextField(app->ta_);   // physical keys type here
+        return;
     }
+    if (code == LV_EVENT_READY)           // Enter = Go
+    {
+        app->navigate(lv_textarea_get_text(app->ta_));
+        return;
+    }
+    if (code == LV_EVENT_CANCEL)
+    {
+        appPageBindTextField(nullptr);
+    }
+}
+
+void BrowserApp::viewCb(lv_event_t *)
+{
+    // Tap on the page itself: the keyboard goes back to wadamesh's nav handling.
+    appPageBindTextField(nullptr);
 }
 
 void BrowserApp::linkCb(lv_event_t *e)
@@ -455,6 +467,7 @@ void BrowserApp::linkCb(lv_event_t *e)
     if (!url) return;
     // The handler fires from inside the renderer's own widget tree; replacing
     // the tree here would delete the widget that is still dispatching.
+    appPageBindTextField(nullptr);   // following a link is not typing
     if (s_active) s_active->navigate(url);
 }
 

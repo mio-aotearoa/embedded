@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "kiwix_catalog.h"
 #include "zim_reader.h"
 
 // Kiwix (ZIM archive) browser, as a wadamesh app page.
@@ -36,6 +37,7 @@ class KiwixApp
     void openArticle(const ZimEntry &entry);
     void setStatus(const char *msg);
     void startDownload(const char *url);
+    void showCatalogue(const char *dir);
 
     static void archiveCb(lv_event_t *e);
     static void downloadCb(lv_event_t *e);
@@ -44,6 +46,11 @@ class KiwixApp
     static void downloadTickCb(lv_timer_t *t);
     static void itemCb(lv_event_t *e);
     static void searchCb(lv_event_t *e);
+    static void catalogueCb(lv_event_t *e);
+    static void catalogItemCb(lv_event_t *e);
+    static void catalogUpCb(lv_event_t *e);
+    static void imeToggleCb(lv_event_t *e);
+    static void fieldBindCb(lv_event_t *e);
     static void destroyAsync(void *p);
 
     static KiwixApp *s_active;
@@ -63,4 +70,7 @@ class KiwixApp
     // share a title prefix, and re-searching for the label would open the
     // first match instead of the row the user actually tapped.
     std::vector<ZimEntry> rowEntries_;
+    // Catalogue rows, keyed the same way: by index into this vector.
+    std::vector<KiwixCatalogItem> catItems_;
+    std::string catDir_;
 };

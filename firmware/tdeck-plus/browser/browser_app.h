@@ -27,6 +27,7 @@ class BrowserApp
 
     static void goCb(lv_event_t *e);
     static void taCb(lv_event_t *e);
+    static void viewCb(lv_event_t *e);
     static void fetchTask(void *arg);
     static void tickCb(lv_timer_t *t);
     static void destroyAsync(void *p);
@@ -36,7 +37,6 @@ class BrowserApp
 
     lv_obj_t *root_ = nullptr;
     lv_obj_t *ta_ = nullptr;
-    lv_obj_t *kb_ = nullptr;
     lv_obj_t *view_ = nullptr;
     lv_obj_t *status_ = nullptr;
     lv_timer_t *timer_ = nullptr;

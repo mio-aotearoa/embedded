@@ -9,6 +9,7 @@
 #include "AppPage.h"
 #include "http_download.h"
 #include "i18n.h"
+#include "ime_ja.h"
 
 #include <Arduino.h>
 #include <SD.h>
@@ -151,10 +152,8 @@ bool DownloadApp::open(void)
     lv_label_set_long_mode(status_, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_color(status_, lv_color_hex(0x9AA4AE), LV_PART_MAIN);
 
-    kb_ = lv_keyboard_create(root_);
-    lv_obj_set_size(kb_, w, 110);
-    lv_obj_align(kb_, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_add_flag(kb_, LV_OBJ_FLAG_HIDDEN);
+    // Physical keyboard only: bind the field, no on-screen keyboard.
+    appPageBindTextField(ta_);
 
     if (WiFi.status() == WL_CONNECTED)
     {
@@ -177,11 +176,11 @@ void DownloadApp::close(void)
         lv_timer_del(timer_);
         timer_ = nullptr;
     }
+    appPageBindTextField(nullptr);      // the field is about to be deleted
     appPageEnd(&DownloadApp::dismiss);
     appPageDeleteRootAsync(root_);
     root_ = nullptr;
     ta_ = nullptr;
-    kb_ = nullptr;
     list_ = nullptr;
     status_ = nullptr;
     getBtn_ = nullptr;
@@ -279,22 +278,26 @@ void DownloadApp::taCb(lv_event_t *e)
     DownloadApp *app = s_active;
     const lv_event_code_t code = lv_event_get_code(e);
 
-    if (code == LV_EVENT_FOCUSED)
+    if (code == LV_EVENT_LONG_PRESSED)
     {
-        if (app->kb_)
-        {
-            lv_keyboard_set_textarea(app->kb_, app->ta_);
-            lv_obj_clear_flag(app->kb_, LV_OBJ_FLAG_HIDDEN);
-        }
+        imeJaToggle();
+        app->setStatus(imeJaActive() ? TR("Japanese: romaji, Space = kana")
+                                     : TR("Type an http:// or https:// URL, then Download"));
         return;
     }
-    if (code == LV_EVENT_DEFOCUSED || code == LV_EVENT_READY || code == LV_EVENT_CANCEL)
+    if (code == LV_EVENT_FOCUSED || code == LV_EVENT_CLICKED)
     {
-        if (app->kb_)
-        {
-            lv_keyboard_set_textarea(app->kb_, nullptr);
-            lv_obj_add_flag(app->kb_, LV_OBJ_FLAG_HIDDEN);
-        }
+        appPageBindTextField(app->ta_);   // physical keys type here
+        return;
+    }
+    if (code == LV_EVENT_READY)           // Enter = press Download
+    {
+        if (app->getBtn_) lv_event_send(app->getBtn_, LV_EVENT_CLICKED, nullptr);
+        return;
+    }
+    if (code == LV_EVENT_CANCEL)
+    {
+        appPageBindTextField(nullptr);
     }
 }
 

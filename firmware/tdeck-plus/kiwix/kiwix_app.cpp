@@ -13,6 +13,7 @@
 #include "AppPage.h"     // wadamesh app-page chrome: root, "< title" bar, async teardown
 #include "http_download.h"  // Wi-Fi -> SD downloader shared with the ESP-AI page
 #include "i18n.h"        // TR()
+#include "ime_ja.h"     // romaji -> kana in wadamesh's typing path
 #include "zim_reader.h"  // ZIM v5/v6 parser (this folder)
 #include "src/extra/libs/sjpg/tjpgd.h"  // wadamesh's JPEG decoder (same copy UITask uses)
 
@@ -318,6 +319,8 @@ bool KiwixApp::open(void)
     lv_obj_set_size(search_, w - 8, 34);
     lv_obj_set_pos(search_, 4, bar + 2);
     lv_obj_add_event_cb(search_, searchCb, LV_EVENT_READY, nullptr);
+    lv_obj_add_event_cb(search_, imeToggleCb, LV_EVENT_LONG_PRESSED, nullptr);
+    lv_obj_add_event_cb(search_, fieldBindCb, LV_EVENT_CLICKED, nullptr);
     lv_obj_add_flag(search_, LV_OBJ_FLAG_HIDDEN);
 
     // URL field for the Wi-Fi download; only shown after tapping the download
@@ -328,6 +331,8 @@ bool KiwixApp::open(void)
     lv_obj_set_size(url_, w - 8, 34);
     lv_obj_set_pos(url_, 4, bar + 40);
     lv_obj_add_event_cb(url_, urlReadyCb, LV_EVENT_READY, nullptr);
+    lv_obj_add_event_cb(url_, imeToggleCb, LV_EVENT_LONG_PRESSED, nullptr);
+    lv_obj_add_event_cb(url_, fieldBindCb, LV_EVENT_CLICKED, nullptr);
     lv_obj_add_event_cb(url_, urlCancelCb, LV_EVENT_CANCEL, nullptr);
     lv_obj_add_flag(url_, LV_OBJ_FLAG_HIDDEN);
 
@@ -344,6 +349,7 @@ bool KiwixApp::open(void)
     lv_obj_set_pos(status_, 4, h - 20);
 
     showArchives();
+    appPageBindTextField(nullptr);      // the archive list needs no typing
     return true;
 }
 
@@ -355,6 +361,7 @@ void KiwixApp::close(void)
         lv_timer_del(dlTimer_);
         dlTimer_ = nullptr;
     }
+    appPageBindTextField(nullptr);       // a field of ours is about to go away
     appPageEnd(&KiwixApp::dismiss);      // hand the status bar back
     appPageDeleteRootAsync(root_);       // never a sync delete from a callback
     root_ = nullptr;
@@ -383,6 +390,7 @@ void KiwixApp::setStatus(const char* msg) { if (status_) lv_label_set_text(statu
 
 void KiwixApp::showArchives(void)
 {
+    appPageBindTextField(nullptr);   // the search field is hidden again
     archive_.close();
     rowEntries_.clear();
     nArchives_ = 0;
@@ -413,6 +421,10 @@ void KiwixApp::showArchives(void)
     }
     dir.close();
 
+    // Browse what the mirror offers before asking for a URL.
+    lv_obj_t* cat = lv_list_add_btn(list_, nullptr, TR("Catalogue: browse Kiwix"));
+    if (cat) lv_obj_add_event_cb(cat, catalogueCb, LV_EVENT_CLICKED, nullptr);
+
     lv_obj_t* dl = lv_list_add_btn(list_, nullptr, TR("Download .zim over Wi-Fi"));
     if (dl) lv_obj_add_event_cb(dl, downloadCb, LV_EVENT_CLICKED, nullptr);
 
@@ -430,6 +442,7 @@ bool KiwixApp::openArchive(const char* path)
     }
     if (search_) lv_textarea_set_text(search_, "");
     showTitles("");
+    appPageBindTextField(search_);      // hardware keys type into the search
     return true;
 }
 
@@ -546,6 +559,110 @@ void KiwixApp::searchCb(lv_event_t* e)
     s_active->showTitles(text ? text : "");
 }
 
+void KiwixApp::fieldBindCb(lv_event_t* e)
+{
+    // Tapping either field hands the physical keyboard to it (they swap places).
+    appPageBindTextField(lv_event_get_target(e));
+}
+
+void KiwixApp::imeToggleCb(lv_event_t* e)
+{
+    (void)e;
+    imeJaToggle();
+    if (s_active)
+        s_active->setStatus(imeJaActive() ? TR("Japanese: romaji, Space = kana")
+                                          : TR("Type a title prefix, then Enter"));
+}
+
+// One row per folder/archive of the mirror's index, browsed a level at a time.
+void KiwixApp::showCatalogue(const char* dir)
+{
+    catDir_ = dir ? dir : "";
+    catItems_.clear();
+    lv_obj_clean(list_);
+    if (search_) lv_obj_add_flag(search_, LV_OBJ_FLAG_HIDDEN);
+    if (url_) lv_obj_add_flag(url_, LV_OBJ_FLAG_HIDDEN);
+    if (list_) lv_obj_clear_flag(list_, LV_OBJ_FLAG_HIDDEN);
+    appPageBindTextField(nullptr);
+
+    setStatus(TR("Loading the catalogue\xE2\x80\xA6"));
+    lv_refr_now(nullptr);   // the fetch blocks the LVGL task: paint this first
+
+    char err[96];
+    if (!kiwixCatalogFetch(catDir_.c_str(), catItems_, err, sizeof err))
+    {
+        catItems_.clear();
+        setStatus(err);
+        lv_obj_t* back = lv_list_add_btn(list_, LV_SYMBOL_LEFT, TR("Back to archives"));
+        if (back) lv_obj_add_event_cb(back, catalogUpCb, LV_EVENT_CLICKED, nullptr);
+        return;
+    }
+
+    if (!catDir_.empty())
+    {
+        lv_obj_t* up = lv_list_add_btn(list_, LV_SYMBOL_UP, "..");
+        if (up) lv_obj_add_event_cb(up, catalogUpCb, LV_EVENT_CLICKED, nullptr);
+    }
+    for (size_t i = 0; i < catItems_.size(); ++i)
+    {
+        const KiwixCatalogItem& it = catItems_[i];
+        char label[140];
+        if (it.isDir) snprintf(label, sizeof label, "%s", it.name);
+        else if (it.size[0]) snprintf(label, sizeof label, "%s  (%s)", it.name, it.size);
+        else snprintf(label, sizeof label, "%s", it.name);
+        lv_obj_t* row = lv_list_add_btn(list_, it.isDir ? LV_SYMBOL_DIRECTORY : LV_SYMBOL_DOWNLOAD, label);
+        if (row) lv_obj_add_event_cb(row, catalogItemCb, LV_EVENT_CLICKED, (void*)(uintptr_t)(i + 1));
+    }
+    char msg[48];
+    snprintf(msg, sizeof msg, TR("%u entries"), (unsigned)catItems_.size());
+    setStatus(msg);
+}
+
+void KiwixApp::catalogueCb(lv_event_t* e)
+{
+    (void)e;
+    if (s_active) s_active->showCatalogue("");
+}
+
+void KiwixApp::catalogUpCb(lv_event_t* e)
+{
+    (void)e;
+    if (!s_active) return;
+    if (s_active->catDir_.empty())
+    {
+        s_active->showArchives();
+        return;
+    }
+    std::string up = s_active->catDir_;
+    while (!up.empty() && up.back() == '/') up.pop_back();
+    const size_t slash = up.rfind('/');
+    up.resize(slash == std::string::npos ? 0 : slash);
+    s_active->showCatalogue(up.c_str());
+}
+
+void KiwixApp::catalogItemCb(lv_event_t* e)
+{
+    if (!s_active) return;
+    const size_t idx = (size_t)(uintptr_t)lv_event_get_user_data(e);
+    if (idx == 0 || idx > s_active->catItems_.size()) return;
+    const KiwixCatalogItem& it = s_active->catItems_[idx - 1];
+
+    if (it.isDir)
+    {
+        std::string child = s_active->catDir_;
+        if (!child.empty()) child += '/';
+        child += it.name;
+        s_active->showCatalogue(child.c_str());
+        return;
+    }
+
+    char url[320];
+    snprintf(url, sizeof url, "https://download.kiwix.org/zim/%s%s%s",
+             s_active->catDir_.empty() ? "" : s_active->catDir_.c_str(),
+             s_active->catDir_.empty() ? "" : "/", it.name);
+    s_active->startDownload(url);
+}
+
 void KiwixApp::downloadCb(lv_event_t* e)
 {
     (void)e;
@@ -555,6 +672,7 @@ void KiwixApp::downloadCb(lv_event_t* e)
     if (!lv_textarea_get_text(s_active->url_)[0])
         lv_textarea_set_text(s_active->url_, kDefaultZimUrl);
     lv_obj_add_state(s_active->url_, LV_STATE_FOCUSED);
+    appPageBindTextField(s_active->url_);   // hardware keys type into the URL
     s_active->setStatus(TR("Edit the URL, then press Enter"));
 }
 
@@ -571,6 +689,7 @@ void KiwixApp::urlCancelCb(lv_event_t* e)
     if (!s_active) return;
     if (s_active->url_) lv_obj_add_flag(s_active->url_, LV_OBJ_FLAG_HIDDEN);
     if (s_active->list_) lv_obj_clear_flag(s_active->list_, LV_OBJ_FLAG_HIDDEN);
+    appPageBindTextField(nullptr);
     s_active->setStatus(TR("Pick an archive"));
 }
 

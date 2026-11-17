@@ -1,5 +1,5 @@
 diff --git a/platformio.ini b/platformio.ini
-index 75e3d7e..e17a42e 100644
+index 75e3d7e..e08801f 100644
 --- a/platformio.ini
 +++ b/platformio.ini
 @@ -537,7 +537,10 @@ platform = platformio/espressif32@6.11.0
@@ -14,7 +14,7 @@ index 75e3d7e..e17a42e 100644
  extra_scripts = pre:scripts/build/pre_gen_baked.py, pre:scripts/inject_wifi_env.py, pre:scripts/build/fatfs_exfat.py, pre:scripts/build/patch_lvgl_anim_uaf.py, pre:scripts/build/patch_lvgl_scroll_uaf.py, pre:scripts/build/patch_lvgl_async_del.py, pre:scripts/build/patch_lvgl_arabic.py, pre:scripts/build/patch_meshcore_txt_timestamp.py, pre:scripts/build/perf_lvgl.py, merge-bin.py
  custom_lvgl_o2 = yes   ; LVGL at -O2 (scripts/build/perf_lvgl.py): ~5% less time a frame, ~39 KB flash
  custom_lvgl_iram = lv_draw_sw_blend.c, lv_draw_label.c   ; their hot loops in IRAM: ~8% less a frame, ~6 KB internal RAM
-@@ -669,6 +672,50 @@ build_flags =
+@@ -669,6 +672,51 @@ build_flags =
    -D CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=16384
    -D CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=4096
  
@@ -26,6 +26,7 @@ index 75e3d7e..e17a42e 100644
 +  ; Paths are relative to this project (third_party/wadamesh), so ../.. is
 +  ; the repository root. The app is compiled into this env instead of being
 +  ; vendored into the submodule.
++  -I ../../firmware/tdeck-plus/ime
 +  -I ../../firmware/tdeck-plus/kiwix
 +  -I ../../third_party/zstd/lib
 +  -D ZSTD_LEGACY_SUPPORT=0
@@ -65,10 +66,11 @@ index 75e3d7e..e17a42e 100644
  build_src_filter =
    +<*.cpp>
    +<*.c>
-@@ -678,6 +725,44 @@ build_src_filter =
+@@ -678,6 +726,45 @@ build_src_filter =
    +<ui-touch/*.cpp>
    +<ui-touch/*.c>
    +<../variants/lilygo_tdeck/*.cpp>
++  +<../../../firmware/tdeck-plus/ime/*.cpp>
 +  +<../../../firmware/tdeck-plus/kiwix/*.cpp>
 +  +<../../../firmware/tdeck-plus/common/*.cpp>
 +  +<../../../firmware/tdeck-plus/esp32ai/*.cpp>
@@ -111,10 +113,10 @@ index 75e3d7e..e17a42e 100644
  lib_deps =
    https://github.com/ALLFATHER-BV/meshcomod.git#core-v1.18.0
 diff --git a/src/ui-touch/AppPage.h b/src/ui-touch/AppPage.h
-index 484c510..92386b5 100644
+index 484c510..b05aad5 100644
 --- a/src/ui-touch/AppPage.h
 +++ b/src/ui-touch/AppPage.h
-@@ -36,6 +36,15 @@ lv_coord_t appPageContentTop();
+@@ -36,6 +36,24 @@ lv_coord_t appPageContentTop();
  /** Usable content height below the status bar. */
  lv_coord_t appPageContentH();
  
@@ -127,11 +129,20 @@ index 484c510..92386b5 100644
 + */
 +lv_coord_t appPageBarCover();
 +
++/**
++ * Make `ta` the target of the PHYSICAL keyboard for as long as the page is up
++ * (pass nullptr to release it). The on-screen keyboard never appears: on boards
++ * with real keys — the T-Deck included — wadamesh keeps that widget hidden and
++ * only uses it as the binding handleHwKey() types into. Without this a page's
++ * text field cannot receive hardware keystrokes at all.
++ */
++void appPageBindTextField(lv_obj_t* ta);
++
  /**
   * Create a page root: full width, from just under the status bar to the bottom of the
   * screen, on lv_layer_top, opaque `bg_color`, non-scrollable and CLICKABLE so no press
 diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
-index 44cc3fc..1b00158 100644
+index 44cc3fc..670f326 100644
 --- a/src/ui-touch/UITask.cpp
 +++ b/src/ui-touch/UITask.cpp
 @@ -154,6 +154,24 @@ static void* wadaMp3Scratch() { return s_wada_mp3_scratch; }
@@ -173,7 +184,93 @@ index 44cc3fc..1b00158 100644
  lv_obj_t* appPageCreateRoot(uint32_t bg_color) {
    lv_obj_t* root = lv_obj_create(lv_layer_top());
    lv_obj_remove_style_all(root);
-@@ -61975,6 +62000,24 @@ enum AppDrawerAction {
+@@ -56926,6 +56951,31 @@ static unsigned long s_hw_last_space_ms = 0;
+ // Route a physical-keyboard character into the textarea currently being edited
+ // — the on-screen keyboard's target, which is the chat composer directly or the
+ // settings mirror textarea. No field open -> the key is ignored.
++// A full-screen app page's own field (browser URL bar, Kiwix search/URL, ...).
++// While it is bound, handleHwKey() types into it directly: the nav handling
++// below would otherwise move focus onto the tab bar hidden BEHIND the page.
++static lv_obj_t* s_page_text_field = nullptr;
++
++// Japanese romaji->kana extension (firmware/tdeck-plus/ime). Declared here so the
++// typing paths below can call it without the UI translation unit including it.
++bool imeJaActive();
++bool imeJaCommit(lv_obj_t* ta);
++
++void appPageBindTextField(lv_obj_t* ta) {
++  if (ta && !lv_obj_is_valid(ta)) ta = nullptr;
++  if (s_page_text_field && s_page_text_field != ta && lv_obj_is_valid(s_page_text_field))
++    lv_obj_clear_state(s_page_text_field, LV_STATE_FOCUSED);
++  s_page_text_field = ta;
++  if (!g_lv.keyboard) return;
++  // Hidden on purpose: these boards have a real keyboard (see the composer path).
++  lv_obj_add_flag(g_lv.keyboard, LV_OBJ_FLAG_HIDDEN);
++  lv_keyboard_set_textarea(g_lv.keyboard, ta);
++  // nullptr leaves typing mode too, so the nav keys work again after the page
++  // releases its field (closing a page must not strand the UI in edit mode).
++  s_nav_ta_editing = ta != nullptr;
++  if (ta) lv_obj_add_state(ta, LV_STATE_FOCUSED);
++}
++
+ static void handleHwKey(int key) {
+   if (key != ' ') s_hw_last_space_ms = 0;
+   if (!g_lv.keyboard) return;
+@@ -57120,6 +57170,33 @@ if (g_lv.task && g_lv.task->isManualLock()) {
+     if (g_lv.keyboard) lv_keyboard_set_textarea(g_lv.keyboard, nullptr);
+     ta_focused = nullptr;
+   }
++  // An app page bound its own field: the keyboard belongs to it — Enter submits,
++  // Backspace edits, Space types a space (not the screen lock), and nothing here
++  // is allowed to navigate the UI sitting behind the page.
++  if (s_page_text_field) {
++    if (!lv_obj_is_valid(s_page_text_field)) {
++      s_page_text_field = nullptr;
++    } else if (ta_focused == s_page_text_field) {
++      if (key == 0x0D || key == 0x0A) {
++        if (imeJaActive()) imeJaCommit(s_page_text_field);
++        lv_event_send(s_page_text_field, LV_EVENT_READY, nullptr);
++      } else if (key == 0x08 || key == 0x7F) {
++        lv_textarea_del_char(s_page_text_field);
++      } else if (key == 27) {
++        lv_event_send(s_page_text_field, LV_EVENT_CANCEL, nullptr);
++      } else if (key == LV_KEY_LEFT) {
++        lv_textarea_cursor_left(s_page_text_field);
++      } else if (key == LV_KEY_RIGHT) {
++        lv_textarea_cursor_right(s_page_text_field);
++      } else if (key == ' ' && imeJaActive() && imeJaCommit(s_page_text_field)) {
++        // the trailing romaji became kana: the space was the conversion key
++      } else if (key >= 0x20 && key < 0x7F) {
++        lv_textarea_add_char(s_page_text_field, (uint32_t)key);
++      }
++      if (g_lv.task) g_lv.task->noteUserInput();
++      return;
++    }
++  }
+ #if CAP_KEYPAD_NAV && !defined(TLORA_PAGER)
+   // Edit mode (keyboard-nav ON only): a focused field becomes the typing target after
+   // select/Enter (below) — until then `ta` is null so the nav keys navigate. With
+@@ -57460,6 +57537,11 @@ if (g_lv.task && g_lv.task->isManualLock()) {
+     }
+     accentBoxHide();
+   } else if (key == ' ') {
++    // Japanese extension: Space converts the trailing romaji run to kana first.
++    if (imeJaActive() && imeJaCommit(ta)) {
++      if (g_lv.task) g_lv.task->noteUserInput();
++      return;
++    }
+     // Double-tap SPACE within kDoubleSpaceMs toggles between English and
+     // the configured secondary keyboard. If no secondary is set, it behaves
+     // as a normal space. The limit is 250 ms, except on the M9: its same-key
+@@ -57488,6 +57570,7 @@ if (g_lv.task && g_lv.task->isManualLock()) {
+       lv_textarea_add_char(ta, ' ');
+     }
+   } else if (key == 0x0D) {                   // regular ENTER (CR)
++    if (imeJaActive()) imeJaCommit(ta);       // commit pending romaji first
+     // Enter is a non-typing action (send / newline / submit) — always tear down the
+     // accent + @-mention popups. The Enter-to-send path keeps the keyboard up "for the
+     // next message", so without this the accent box for the last letter lingers over
+@@ -61975,6 +62058,24 @@ enum AppDrawerAction {
    APPACT_TERMINAL, APPACT_FILES, APPACT_FILE_TRANSFER, APPACT_SPECTRUM, APPACT_SNAKE, APPACT_VNC, APPACT_REMOTE, APPACT_READER,
    APPACT_DISCOVER, APPACT_STORE,
    APPACT_USB_FILES,
@@ -198,7 +295,7 @@ index 44cc3fc..1b00158 100644
    APPACT_LUA_BASE = 100,   // APPACT_LUA_BASE + i = installed Lua app s_lua_inst[i]
  };
  // The drawer's built-in tiles, which are also what an App widget on Home can open.
-@@ -62017,6 +62060,24 @@ static const AppTileDef k_app_tiles[] = {
+@@ -62017,6 +62118,24 @@ static const AppTileDef k_app_tiles[] = {
    { UI_ICON_GAMEPAD_2,          "Snake",     APPACT_SNAKE,     HUE_MSG },     // native snake (Lua boards install it from the Store)
  #else
    { UI_ICON_STORE,              "Store",     APPACT_STORE,     HUE_MSG },     // Lua app store
@@ -223,7 +320,7 @@ index 44cc3fc..1b00158 100644
  #endif
    { UI_ICON_HOUSE,              "Home",      APPACT_CMDCENTER, HUE_SYS },     // back to the Home widgets
    { UI_ICON_POWER,              "Power",     APPACT_POWER,     kAppHueDanger },
-@@ -62401,6 +62462,24 @@ static void appLaunch(int act, lv_event_t* e) {
+@@ -62401,6 +62520,24 @@ static void appLaunch(int act, lv_event_t* e) {
  #else
      case APPACT_SNAKE:     SnakeGame::launch();  return;
  #endif
@@ -248,7 +345,7 @@ index 44cc3fc..1b00158 100644
  #if defined(HAS_TOUCH_UI)
      case APPACT_TERMINAL:  homeTerminalCb(e);    return;
  #endif
-@@ -89760,3 +89839,17 @@ static void docAuditFocus() {
+@@ -89760,3 +89897,17 @@ static void docAuditFocus() {
  }
  #endif
  #endif  // DOC_CAPTURE
