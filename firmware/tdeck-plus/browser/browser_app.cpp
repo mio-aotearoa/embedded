@@ -314,7 +314,13 @@ void BrowserApp::navigate(const char *url)
 
     memset((void *)&s_fetch, 0, sizeof s_fetch);
     snprintf(s_fetch.url, sizeof s_fetch.url, "%s", full);
-    if (ta_) lv_textarea_set_text(ta_, full);   // show what is actually fetched
+    if (ta_ && strcmp(lv_textarea_get_text(ta_), full) != 0)
+    {
+        // Show what is actually fetched ("example.com" gains its https://), but
+        // never fight the user's own text when it already matches.
+        lv_textarea_set_text(ta_, full);
+        lv_textarea_set_cursor_pos(ta_, LV_TEXTAREA_CURSOR_LAST);
+    }
     s_fetch.running = true;
     setStatus(TR("Loading..."));
 
@@ -328,37 +334,75 @@ void BrowserApp::navigate(const char *url)
 void BrowserApp::fetchTask(void *)
 {
     FetchState &f = s_fetch;
-    HTTPClient http;
-    http.setTimeout(9000);
-    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
-    // The clients must outlive http.GET(): HTTPClient keeps a pointer to them.
+    // Follow redirects by hand. Most real hosts answer with a 301/302 to another
+    // host or to a longer path (duckduckgo.com does), and HTTPClient cannot
+    // re-connect a caller-supplied WiFiClientSecure across hosts: with its own
+    // following enabled that abort surfaces as a bare "HTTP -1".
+    char current[256];
+    snprintf(current, sizeof current, "%s", f.url);
+
+    HTTPClient http;
     WiFiClient plain;
     WiFiClientSecure secure;
-    bool begun = false;
-    if (strncmp(f.url, "https://", 8) == 0)
+    int code = 0;
+    for (int hop = 0; hop <= 4; ++hop)
     {
+        http.setTimeout(9000);
+        http.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
+        // Some sites reject an unfamiliar agent outright; this is honest but
+        // still recognisable as a browser.
+        http.setUserAgent("Mozilla/5.0 (compatible; wadamesh-tdeck)");
+
         secure.setInsecure();  // no certificate store here, same as the Reader
-        begun = http.begin(secure, f.url);
-    }
-    else
-    {
-        begun = http.begin(plain, f.url);
+        const bool begun = strncmp(current, "https://", 8) == 0
+                               ? http.begin(secure, current)
+                               : http.begin(plain, current);
+        if (!begun)
+        {
+            snprintf(f.err, sizeof f.err, "%s", "Cannot open the connection");
+            f.running = false;
+            f.done = true;
+            vTaskDelete(nullptr);
+            return;
+        }
+
+        code = http.GET();
+        if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308)
+        {
+            String loc = http.header("Location");
+            http.end();
+            if (!loc.length() || hop == 4)
+            {
+                snprintf(f.err, sizeof f.err, "%s",
+                         loc.length() ? "Too many redirects" : "Redirect without a Location");
+                f.running = false;
+                f.done = true;
+                vTaskDelete(nullptr);
+                return;
+            }
+            if (loc.startsWith("http"))
+            {
+                snprintf(current, sizeof current, "%s", loc.c_str());
+            }
+            else
+            {
+                const char* scheme = strstr(current, "://");
+                const char* slash = scheme ? strchr(scheme + 3, '/') : nullptr;
+                const size_t base = slash ? (size_t)(slash - current) : strlen(current);
+                char next[256];
+                snprintf(next, sizeof next, "%.*s%s", (int)base, current, loc.c_str());
+                snprintf(current, sizeof current, "%s", next);
+            }
+            continue;
+        }
+        break;
     }
 
-    if (!begun)
-    {
-        snprintf(f.err, sizeof f.err, "%s", "Cannot open the connection");
-        f.running = false;
-        f.done = true;
-        vTaskDelete(nullptr);
-        return;
-    }
-
-    const int code = http.GET();
     if (code != 200)
     {
-        snprintf(f.err, sizeof f.err, "HTTP %d", code);
+        snprintf(f.err, sizeof f.err, "HTTP %d (%s)", code,
+                 HTTPClient::errorToString(code).c_str());
         http.end();
         f.running = false;
         f.done = true;
@@ -368,6 +412,9 @@ void BrowserApp::fetchTask(void *)
 
     String body = http.getString();
     http.end();
+    // Remember the address that actually served the page, so links resolve and
+    // the status line shows the truth after a redirect.
+    snprintf(f.url, sizeof f.url, "%s", current);
 
     if (f.discard)
     {
