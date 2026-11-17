@@ -74,3 +74,12 @@ table instead of the fork's dual 4.5 MB slots.
   overflow. As `const` they go to `.flash.rodata` and the browser links. `dir`
   points this series at `TactileBrowser/tactilebrowser_core/lexbor`, the nested
   submodule that actually holds Lexbor, so `patches.sh apply` works unchanged.
+
+## TactileBrowserCore
+
+`third_party/TactileBrowser` itself (not the nested Lexbor repo) carries one
+patch: `0001-text-style` adds an optional `set_text_style` callback to
+`RenderInterface` and calls it with the font size and weight the DOM/CSS
+computed. Without it the engine threw that sizing away, every label used the
+same face, and a laid-out page was indistinguishable from the Reader's text
+pass. Its `dir` is `TactileBrowser`, so it applies beside the Lexbor series.

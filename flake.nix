@@ -136,7 +136,7 @@
               fi
 
               cd "$root"
-              ./scripts/patches.sh apply wadamesh TactileBrowser
+              ./scripts/patches.sh apply wadamesh TactileBrowser TactileBrowserCore
               ./scripts/duktape.sh
 
               export PLATFORMIO_CORE_DIR="''${PLATFORMIO_CORE_DIR:-$root/.platformio}"

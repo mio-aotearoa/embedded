@@ -1,0 +1,43 @@
+diff --git a/tactilebrowser_core/include/common_types.h b/tactilebrowser_core/include/common_types.h
+index 78f5d8d..30399c0 100644
+--- a/tactilebrowser_core/include/common_types.h
++++ b/tactilebrowser_core/include/common_types.h
+@@ -92,6 +92,9 @@ typedef struct {
+   int (*get_height)(Renderer *renderer, void *widget);
+   // Platform-specific data
+   void *platform_data;
++  // Set font size (px) and weight for a text widget (optional, may be NULL)
++  void (*set_text_style)(Renderer *renderer, void *widget, int font_size,
++                         bool bold);
+ } RenderInterface;
+ 
+ // Actual Renderer struct definition
+diff --git a/tactilebrowser_core/lexbor b/tactilebrowser_core/lexbor
+--- a/tactilebrowser_core/lexbor
++++ b/tactilebrowser_core/lexbor
+@@ -1 +1 @@
+-Subproject commit 12e57140568207603e951f09005a5f9918acb432
++Subproject commit 12e57140568207603e951f09005a5f9918acb432-dirty
+diff --git a/tactilebrowser_core/src/layout_engine.cpp b/tactilebrowser_core/src/layout_engine.cpp
+index c5f3008..e9bc68b 100644
+--- a/tactilebrowser_core/src/layout_engine.cpp
++++ b/tactilebrowser_core/src/layout_engine.cpp
+@@ -791,6 +791,18 @@ static void layout_render_node(LayoutNode *node, RenderContext *render_ctx,
+ 
+     widget = node->widget;
+ 
++    // The box carries the size the DOM/CSS computed; without passing it on,
++    // every label renders at one size and a laid-out page looks like the text
++    // fallback.
++    if (widget && iface->set_text_style) {
++      const bool bold = node->type == ELEMENT_STRONG ||
++                        node->type == ELEMENT_BOLD ||
++                        (node->type >= ELEMENT_HEADING1 &&
++                         node->type <= ELEMENT_HEADING6);
++      iface->set_text_style(render_ctx->renderer, widget, node->box.font_size,
++                            bold);
++    }
++
+     if (widget && iface->set_text_color) {
+       iface->set_text_color(render_ctx->renderer, widget, node->box.color);
+     }

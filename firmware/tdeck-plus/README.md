@@ -90,7 +90,7 @@ applied automatically; `./scripts/patches.sh status wadamesh` shows it.
 
 ## Limitations
 
-* Text/HTML articles only. Articles up to 64 KB are laid out by the Lexbor
+* Text/HTML articles only. Articles up to 128 KB are laid out by the Lexbor
   renderer — the same one fetched pages use — so headings, colours and the CSS
   subset apply; larger articles fall back to the Reader's text pass, which drops
   images, CSS and tables. The renderer does not decode images at all (the first
@@ -102,5 +102,5 @@ applied automatically; `./scripts/patches.sh status wadamesh` shows it.
 * One archive is open at a time; the working file is
   `/meshcomod/kiwix/article.htm` on the card.
 * The image is flashed over USB (`firmware/tdeck-plus/build.sh -t upload`,
-  or `nix run .#firmware -- -t upload`); it links at 7,134,897 B (87.8 % of
+  or `nix run .#firmware -- -t upload`); it links at 7,135,237 B (87.8 % of
   the app slot). See `docs/architecture.md` for the measured figures.

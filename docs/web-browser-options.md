@@ -17,7 +17,7 @@ certificate store.
 
 **Can the Reader do CSS or JS? Yes — since the merge, the renderer does layout and
 inline scripts; the text pass is only the fallback.** Fetched pages and local HTML
-up to 64 KB go to our Lexbor renderer first. A page it cannot lay out, or a
+up to 128 KB go to our Lexbor renderer first. A page it cannot lay out, or a
 document bigger than that buffer, falls back to `ReaderContent::htmlToText`
 (`src/ui-touch/ReaderContent.cpp`): one tag-stripping pass that skips the body of
 every `<script>` and `<style>` element, drops all other tags, decodes entities,
@@ -38,7 +38,7 @@ new flash.
   has to move.
 * **Flash:** this build now uses `firmware/tdeck-plus/partitions_tdeck_browser.csv`:
   one 7.75 MB `factory` app slot (0x7C0000), no OTA. The image with Kiwix,
-  ESP-AI, LocalSend, the periodic table and the web renderer is **7,134,897 B** —
+  ESP-AI, LocalSend, the periodic table and the web renderer is **7,135,237 B** —
   **87.8 %** of the slot, about **0.95 MB free**. The table below shows the alternatives, and
   why the old 3.875 MB figure is gone.
 * **RAM:** 512 KB internal SRAM + 8 MB PSRAM. The S3 has no MMU, and QuickJS or
@@ -103,7 +103,7 @@ It is in the shipping image. The blocker was Lexbor's legacy encoding tables
 (~760 KB of writable initialized data, 613,584 B of DRAM overflow); making every
 table in `encoding/multi.c` `const` through `patches/TactileBrowser/` moves them
 to flash. The T-Deck image uses **149,640 / 327,680 B of RAM (45.7%)** and
-**7,134,897 / 8,126,464 B of flash (87.8%)**.
+**7,135,237 / 8,126,464 B of flash (87.8%)**.
 
 A page gets: URL entry, fetch (redirects followed, TLS `setInsecure()`), HTML
 parsing, the core's CSS subset (tag/class/id selectors, box model, colours,
@@ -173,7 +173,7 @@ DOM milestone the current page still lacks.
 ## What was chosen
 
 1. **The Reader is "the browser"**, with TactileBrowser's core merged into it:
-   fetched pages and local `.htm`/`.html` files up to 64 KB are laid out with
+   fetched pages and local `.htm`/`.html` files up to 128 KB are laid out with
    Lexbor; the text pass is the fallback. One Web tile, one fetch path.
 2. **TactileBrowser's core was extracted, not the project.** Its
    `RenderInterface` needed only an LVGL 8.3 renderer, an HTTP(S) fetcher and a
@@ -191,7 +191,7 @@ DOM milestone the current page still lacks.
 
 The engine survey was read from each project's README, site and source layout on
 2026-11-17. Only TactileBrowser was built: its core is linked in, and the image
-measures **7,134,897 B of 8,126,464** (87.8% of the 7.75 MB slot) with
+measures **7,135,237 B of 8,126,464** (87.8% of the 7.75 MB slot) with
 **149,640 B of RAM**. The JS layer and the ZIM parser have host tests, and
 `nix run .#firmware` builds the device image. eBrowser, Agave and babe32 were not
 built, so their figures remain claims. The shipped page has not yet been

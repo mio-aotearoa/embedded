@@ -101,6 +101,9 @@ FetchState s_fetch = {};
 // of to BrowserApp, which is not open in that case.
 void (*s_into_link_cb)(const char*) = nullptr;
 
+// Why the last browserRenderInto() fell back, for the Reader's status line.
+const char* s_render_error = "ok";
+
 // ---- renderer -------------------------------------------------------------
 
 bool rInit(Renderer *) { return true; }
@@ -211,12 +214,20 @@ int rGetHeight(Renderer *, void *widget)
     return widget ? (int)lv_obj_get_height((lv_obj_t *)widget) : 0;
 }
 
+void rSetTextStyle(Renderer *, void *widget, int font_size, bool bold)
+{
+    if (!widget) return;
+    lv_obj_set_style_text_font((lv_obj_t *)widget, readerWebFont(font_size, bold),
+                               LV_PART_MAIN);
+}
+
 void rRegisterLink(Renderer *, void *widget, const char *url)
 {
     if (!widget || !url) return;
     char *copy = (char *)malloc(strlen(url) + 1);
     if (!copy) return;
     strcpy(copy, url);
+    lv_obj_set_style_text_decor((lv_obj_t *)widget, LV_TEXT_DECOR_UNDERLINE, LV_PART_MAIN);
     lv_obj_add_flag((lv_obj_t *)widget, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb((lv_obj_t *)widget, BrowserApp::linkCb, LV_EVENT_CLICKED, copy);
 }
@@ -224,9 +235,11 @@ void rRegisterLink(Renderer *, void *widget, const char *url)
 RenderInterface s_iface = {
     rInit, rCleanup, rCreateLabel, rCreateButton, rCreateTextInput, rCreateTextArea,
     rRegisterLink, rCreateContainer, rSetTextColor, rSetBgColor, rSetBgGradient,
-    rSetTextAlign, rClearContainer, rGetHeight, nullptr,
+    rSetTextAlign, rClearContainer, rGetHeight, nullptr, rSetTextStyle,
 };
 }  // namespace
+
+const char* browserLastRenderError() { return s_render_error; }
 
 BrowserApp *BrowserApp::s_active = nullptr;
 char BrowserApp::barTitle_[32];
@@ -610,9 +623,10 @@ void BrowserApp::tickCb(lv_timer_t *)
 bool browserRenderInto(lv_obj_t* parent, const char* url, const char* html, size_t len,
                        void (*on_link)(const char*))
 {
+    s_render_error = "no markup";
     if (!parent || !html || len == 0) return false;
     lexborUsePsram();
-    if (!tactilebrowser_core_init()) return false;
+    if (!tactilebrowser_core_init()) { s_render_error = "core init"; return false; }
     tactilebrowser_set_renderer(&s_iface);
 
     // Inline scripts first, exactly as this app does: document.write() output is
@@ -626,5 +640,13 @@ bool browserRenderInto(lv_obj_t* parent, const char* url, const char* html, size
     const RenderResult result = tactilebrowser_render_html_string(
         url ? url : "", doc, docLen, parent, lv_obj_get_width(parent), 4000);
     free(scripted);
+    switch (result)
+    {
+        case RENDER_SUCCESS:      s_render_error = "ok"; break;
+        case RENDER_ERROR_PARSE:  s_render_error = "parse"; break;
+        case RENDER_ERROR_MEMORY: s_render_error = "memory"; break;
+        case RENDER_ERROR_NETWORK:s_render_error = "network"; break;
+        default:                  s_render_error = "no body"; break;
+    }
     return result == RENDER_SUCCESS;
 }

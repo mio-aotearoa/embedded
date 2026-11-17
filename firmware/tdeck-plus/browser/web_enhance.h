@@ -15,3 +15,11 @@
 // back to its own text rendering.
 bool browserRenderInto(lv_obj_t* parent, const char* url, const char* html, size_t len,
                        void (*on_link)(const char*));
+
+// Why the last browserRenderInto() call fell back ("ok" on success): "parse",
+// "core init", "no body", … so the Reader can say it instead of guessing.
+const char* browserLastRenderError();
+
+// The Reader's CJK-capable fonts, so laid-out pages keep the same glyph coverage
+// as the text view instead of falling back to Montserrat.
+const lv_font_t* readerWebFont(int px, bool bold);
