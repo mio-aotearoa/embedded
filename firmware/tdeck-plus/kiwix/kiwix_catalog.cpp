@@ -262,10 +262,10 @@ bool kiwixCatalogStart(const char* dir)
     s_state.done = false;
     s_state.ok = false;
     s_state.err[0] = '\0';
-    // The same shape as the shared downloader (12 KB/2) and the Reader fetch
-    // (16 KB/4), which do the same HTTPS GET successfully. 10 KB at priority 1
-    // lost the TLS handshake to the UI task often enough to fail with -1.
-    if (xTaskCreate(catalogTask, "kicat", 16384, nullptr, 2, nullptr) != pdPASS)
+    // The same shape as the Reader's fetch (16 KB/4), which does the same HTTPS
+    // GET successfully. 10 KB at priority 1 lost the TLS handshake to the UI
+    // task often enough to fail with HTTPClient -1.
+    if (xTaskCreate(catalogTask, "kicat", 16384, nullptr, 4, nullptr) != pdPASS)
     {
         s_state.running = false;
         return false;

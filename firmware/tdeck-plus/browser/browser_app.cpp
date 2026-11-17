@@ -25,12 +25,60 @@
 #include <WiFiClientSecure.h>
 #include <lvgl.h>
 
+#include <esp_heap_caps.h>
+#include <lexbor/core/lexbor.h>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 namespace
 {
+// ---- allocator ------------------------------------------------------------
+// Lexbor's default allocator is plain malloc, which on this Arduino/IDF build
+// serves INTERNAL RAM only. A real page's DOM is several times its markup, so
+// the parse ran out of internal RAM and returned RENDER_ERROR_PARSE; the Reader
+// then quietly showed its text pass. Point Lexbor at PSRAM (internal RAM stays
+// for radio/TLS), falling back to internal only if PSRAM is exhausted.
+void *lxbAlloc(size_t n)
+{
+    if (n == 0) n = 1;
+    void *p = heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    return p ? p : heap_caps_malloc(n, MALLOC_CAP_8BIT);
+}
+
+void *lxbRealloc(void *dst, size_t n)
+{
+    if (!dst) return lxbAlloc(n);
+    void *p = lxbAlloc(n);
+    if (!p) return nullptr;
+    const size_t old = heap_caps_get_allocated_size(dst);
+    memcpy(p, dst, old < n ? old : n);
+    heap_caps_free(dst);
+    return p;
+}
+
+void *lxbCalloc(size_t num, size_t size)
+{
+    if (size && num > (size_t)-1 / size) return nullptr;
+    const size_t n = num * size;
+    void *p = lxbAlloc(n);
+    if (p) memset(p, 0, n);
+    return p;
+}
+
+void lxbFree(void *p) { heap_caps_free(p); }
+
+// Idempotent: must run before the first Lexbor allocation (css_parser_init()).
+void lexborUsePsram()
+{
+    static bool done = false;
+    if (!done)
+    {
+        done = lexbor_memory_setup(lxbAlloc, lxbRealloc, lxbCalloc, lxbFree) == LXB_STATUS_OK;
+    }
+}
+
 constexpr uint32_t kBg = 0x101418;
 constexpr size_t kMaxHtml = 16384;
 
@@ -221,6 +269,7 @@ bool BrowserApp::open(void)
     snprintf(barTitle_, sizeof barTitle_, "%s", TR("Browser"));
     appPageBegin(barTitle_, &BrowserApp::dismiss);
 
+    lexborUsePsram();
     if (!tactilebrowser_core_init()) return false;
     tactilebrowser_set_renderer(&s_iface);
 
@@ -562,6 +611,7 @@ bool browserRenderInto(lv_obj_t* parent, const char* url, const char* html, size
                        void (*on_link)(const char*))
 {
     if (!parent || !html || len == 0) return false;
+    lexborUsePsram();
     if (!tactilebrowser_core_init()) return false;
     tactilebrowser_set_renderer(&s_iface);
 

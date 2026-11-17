@@ -255,7 +255,10 @@ bool httpDownloadStart(const char *url, const char *destPath, uint64_t expectedS
     s_state.err[0] = '\0';
     snprintf(s_state.path, sizeof s_state.path, "%s", destPath);
 
-    if (xTaskCreate(downloadTask, "httpdl", 12288, nullptr, 2, &s_task) != pdPASS)
+    // 16 KB/4 like the Reader's fetch, which does the same HTTPS GET and works.
+    // At 12 KB/2 the handshake failed with HTTPClient -1 ("connection refused"),
+    // which is what the ESP-AI model download reported.
+    if (xTaskCreate(downloadTask, "httpdl", 16384, nullptr, 4, &s_task) != pdPASS)
     {
         s_state.running = false;
         s_task = nullptr;
