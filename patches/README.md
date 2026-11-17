@@ -24,6 +24,11 @@ applied. To capture an edit, resolve it in the submodule, then use
 `./scripts/patches.sh refresh <project>` and move the interesting hunks into the
 numbered patch (the generated `9999-worktree.patch` is a scratch file).
 
+A T-Deck build regenerates the vendored `src/ui-touch/i18n_builtin.h` (the
+committed copy is stale), so restore it with `git checkout --` before capturing
+a patch: otherwise the generated table's ~36,000-line churn lands in the series.
+It is build output, not a change of ours.
+
 ## wadamesh
 
 The base is `jade-on-mesh/wadamesh-tak` (`third_party/wadamesh`). That fork's
