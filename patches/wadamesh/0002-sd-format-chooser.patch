@@ -1,0 +1,132 @@
+diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
+index eb986ee..2dc1662 100644
+--- a/src/ui-touch/UITask.cpp
++++ b/src/ui-touch/UITask.cpp
+@@ -27645,7 +27645,19 @@ static const char* sdRemovedAlertText() {
+                           : TR("SD card removed");
+ }
+ #endif
+-static int       s_sd_format_pending = 0;   // deferred FAT32 format (runs after notice paints)
++static int       s_sd_format_pending = 0;   // deferred format (runs after notice paints)
++
++// Filesystem picked in the SD format dialog. FatFs option bits: MC_FM_FAT32 is
++// 0x02; exFAT is 0x04 (the fatfs_exfat pre-script compiles exFAT in). LittleFS
++// is not offered here: Arduino's LittleFS mounts a partition, not a card, so a
++// LittleFS-formatted SD cannot be mounted by the SD library this UI browses.
++#ifndef MC_FM_EXFAT
++  #define MC_FM_EXFAT 0x04
++#endif
++static uint8_t   s_sd_format_opt  = MC_FM_FAT32;
++static const char* s_sd_format_name = "FAT32";
++static lv_obj_t* s_sd_format_menu = nullptr;
++static char      s_sd_format_msg[160];
+ static lv_obj_t* s_fm_fmt_overlay = nullptr; // full-screen "formatting..." notice
+ static lv_obj_t* s_fm_actions    = nullptr;  // per-entry action sheet
+ static lv_obj_t* s_fm_prompt     = nullptr;  // text-input modal (rename / new folder)
+@@ -29541,12 +29553,73 @@ static void fmSdDoFormat() {
+       g_lv.task->showAlert(TR("SD is busy - close tools and retry"), 2600);
+     return;
+   }
+-  fmShowBusyOverlay("Formatting SD as MESHCOMOD (FAT32)\n\n"
+-                    "Creates the core folders too.\n"
+-                    "Do NOT power off, disconnect,\nor remove the card.\n\n"
+-                    "This can take up to a minute...");
++  snprintf(s_sd_format_msg, sizeof s_sd_format_msg,
++           "Formatting SD as %s%s\n\n"
++           "%s"
++           "Do NOT power off, disconnect,\nor remove the card.\n\n"
++           "This can take up to a minute...",
++           s_sd_format_name,
++           s_sd_format_opt == MC_FM_FAT32 ? " (MESHCOMOD)" : "",
++           s_sd_format_opt == MC_FM_FAT32 ? "Creates the core folders too.\n" : "");
++  fmShowBusyOverlay(s_sd_format_msg);
+   s_sd_format_pending = 2;
+ }
++
++// Filesystem chooser for the SD format action. FAT32 is the MESHCOMOD layout;
++// exFAT is available for cards shared with desktops that cannot use FAT32.
++static void fmSdFormatMenuClose() {
++  if (s_sd_format_menu) { lv_obj_del_async(s_sd_format_menu); s_sd_format_menu = nullptr; }
++}
++static void fmSdFormatPickCb(lv_event_t* e) {
++  if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
++  s_sd_format_opt = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
++  s_sd_format_name = s_sd_format_opt == MC_FM_EXFAT ? "exFAT" : "FAT32";
++  fmSdFormatMenuClose();
++  fmSdDoFormat();
++}
++static void fmSdFormatCancelCb(lv_event_t* e) {
++  if (lv_event_get_code(e) == LV_EVENT_CLICKED) fmSdFormatMenuClose();
++}
++static void fmSdFormatMenu() {
++  if (s_sd_format_menu) return;
++  lv_obj_t* m = lv_obj_create(lv_layer_top());
++  s_sd_format_menu = m;
++  lv_obj_set_size(m, 270, 196);
++  lv_obj_center(m);
++  lv_obj_set_style_bg_color(m, lv_color_hex(0x1B2026), 0);
++  lv_obj_set_style_border_width(m, 1, 0);
++  lv_obj_set_style_border_color(m, lv_color_hex(0x3A424C), 0);
++  lv_obj_set_style_radius(m, 8, 0);
++  lv_obj_clear_flag(m, LV_OBJ_FLAG_SCROLLABLE);
++
++  lv_obj_t* title = lv_label_create(m);
++  lv_label_set_text(title, "Format SD card as:");
++  lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 6);
++
++  lv_obj_t* warn = lv_label_create(m);
++  lv_label_set_text(warn, "All data on the card will be erased.");
++  lv_obj_set_style_text_color(warn, lv_color_hex(0xB0B8C0), 0);
++  lv_obj_align(warn, LV_ALIGN_TOP_MID, 0, 28);
++
++  static const char* names[2] = {"FAT32 (MESHCOMOD)", "exFAT"};
++  static const uint8_t opts[2] = {MC_FM_FAT32, MC_FM_EXFAT};
++  for (int i = 0; i < 2; ++i) {
++    lv_obj_t* b = lv_btn_create(m);
++    lv_obj_set_size(b, 226, 38);
++    lv_obj_align(b, LV_ALIGN_TOP_MID, 0, 56 + i * 44);
++    lv_obj_t* l = lv_label_create(b);
++    lv_label_set_text(l, names[i]);
++    lv_obj_center(l);
++    lv_obj_add_event_cb(b, fmSdFormatPickCb, LV_EVENT_CLICKED, (void*)(uintptr_t)opts[i]);
++  }
++  lv_obj_t* c = lv_btn_create(m);
++  lv_obj_set_size(c, 226, 34);
++  lv_obj_align(c, LV_ALIGN_BOTTOM_MID, 0, -6);
++  lv_obj_t* cl = lv_label_create(c);
++  lv_label_set_text(cl, "Cancel");
++  lv_obj_center(cl);
++  lv_obj_add_event_cb(c, fmSdFormatCancelCb, LV_EVENT_CLICKED, nullptr);
++}
+ // Tap on an unmounted SD row: try to mount, and if the card is unreadable
+ // (no FAT16/FAT32/exFAT volume, or a corrupt one) offer to format.
+ static void fmSdMountOrFormatCb(lv_event_t* e) {
+@@ -29554,7 +29627,7 @@ static void fmSdMountOrFormatCb(lv_event_t* e) {
+   s_sd_retry_after_ms = 0;   // explicit user retry — bypass the mount backoff
+   if (fmSdTryMount()) { fmShowRoots(); return; }
+   s_confirm_owner_next = true;
+-  showConfirm(TR("Format SD as MESHCOMOD (FAT32)?\nAll data on the card will be erased."), TR("Format"), fmSdDoFormat);
++  fmSdFormatMenu();
+ }
+ 
+ // Seed the core folder layout on a freshly-formatted MESHCOMOD card. These back
+@@ -29645,7 +29718,7 @@ static void sdWriteFatLabel(uint8_t pdrv, const char* label) {
+ static void fmSdLongPressFormatCb(lv_event_t* e) {
+   if (lv_event_get_code(e) != LV_EVENT_LONG_PRESSED) return;
+   s_confirm_owner_next = true;
+-  showConfirm(TR("Reformat SD as MESHCOMOD (FAT32)?\nALL data on the card will be erased."), TR("Format"), fmSdDoFormat);
++  fmSdFormatMenu();
+ }
+ 
+ #endif  // HAS_TDECK_GT911 || HAS_THINKNODE_M9 (microSD mount/format helpers)
+@@ -87609,8 +87682,8 @@ void UITask::loop() {
+           char drv[3] = { (char)('0' + pdrv), ':', 0 };
+           void* work = malloc(4096);                       // f_mkfs scratch (>= FF_MAX_SS)
+           if (work) {
+-            if (f_mkfs(drv, MC_FM_FAT32, 0, work, 4096) == 0 /*FR_OK*/) {
+-              sdWriteFatLabel(pdrv, "MESHCOMOD");
++            if (f_mkfs(drv, s_sd_format_opt, 0, work, 4096) == 0 /*FR_OK*/) {
++              if (s_sd_format_opt == MC_FM_FAT32) sdWriteFatLabel(pdrv, "MESHCOMOD");
+               mkfs_ok = true;
+               ok = true;
+             }
