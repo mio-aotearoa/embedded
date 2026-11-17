@@ -5,8 +5,10 @@
 // HTML/CSS come from the pinned TactileBrowser core (third_party/TactileBrowser,
 // Lexbor inside). That core talks to the platform only through RenderInterface
 // function pointers, so it needs no LVGL 9 port: this file supplies an LVGL 8.3
-// renderer, an HTTP(S) fetcher and the page chrome. JavaScript is not wired yet
-// (the core has no JS engine; Duktape would be the next step).
+// renderer, an HTTP(S) fetcher and the page chrome. Inline scripts run on Duktape
+// (js_engine.cpp) before layout. The renderer is also what wadamesh's built-in
+// Web page uses, through browserRenderInto() in web_enhance.h; BrowserApp's own
+// chrome has no drawer tile any more and exists for that platform layer.
 #include "browser_app.h"
 
 #include "AppPage.h"
