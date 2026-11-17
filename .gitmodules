@@ -1,0 +1,12 @@
+[submodule "third_party/esp32-photoframe"]
+	path = third_party/esp32-photoframe
+	url = https://github.com/aitjcize/esp32-photoframe
+[submodule "third_party/ESP32Drop"]
+	path = third_party/ESP32Drop
+	url = https://github.com/s-iwaki-d/ESP32Drop
+[submodule "third_party/zstd"]
+	path = third_party/zstd
+	url = https://github.com/facebook/zstd
+[submodule "third_party/wadamesh"]
+	path = third_party/wadamesh
+	url = https://github.com/ALLFATHER-BV/wadamesh

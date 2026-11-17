@@ -1,0 +1,11 @@
+# PlatformIO core dir (toolchains, frameworks, libraries) — ~1 GB.
+.platformio/
+third_party/wadamesh/.pio/
+
+# Build/merge output from PlatformIO (wadamesh's merge-bin.py writes here).
+firmware/tdeck-plus/out/
+third_party/wadamesh/out/
+
+# Nix
+result
+result-*

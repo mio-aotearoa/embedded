@@ -1,0 +1,97 @@
+diff --git a/platformio.ini b/platformio.ini
+index 75e3d7e..d718b6c 100644
+--- a/platformio.ini
++++ b/platformio.ini
+@@ -669,6 +669,20 @@ build_flags =
+   -D CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=16384
+   -D CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=4096
+ 
++  ; --- Kiwix (ZIM) reader: this repository's sources + pinned zstd ---
++  ; WADAMESH_KIWIX guards the app hook in UITask.cpp, so this env (and only
++  ; this env) compiles the Kiwix app; the other T-Deck-adjacent envs still build
++  ; from the unpatched UI.
++  -D WADAMESH_KIWIX=1
++  ; Paths are relative to this project (third_party/wadamesh), so ../.. is
++  ; the repository root. The app is compiled into this env instead of being
++  ; vendored into the submodule.
++  -I ../../firmware/tdeck-plus/kiwix
++  -I ../../third_party/zstd/lib
++  -D ZSTD_LEGACY_SUPPORT=0
++  -D ZSTD_MULTITHREAD=0
++  -D ZSTD_DISABLE_ASM=1
++  -D ZSTD_STRIP_ERROR_STRINGS=1
+ build_src_filter =
+   +<*.cpp>
+   +<*.c>
+@@ -678,6 +692,9 @@ build_src_filter =
+   +<ui-touch/*.cpp>
+   +<ui-touch/*.c>
+   +<../variants/lilygo_tdeck/*.cpp>
++  +<../../../firmware/tdeck-plus/kiwix/*.cpp>
++  +<../../../third_party/zstd/lib/common/*.c>
++  +<../../../third_party/zstd/lib/decompress/*.c>
+ 
+ lib_deps =
+   https://github.com/ALLFATHER-BV/meshcomod.git#core-v1.18.0
+diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
+index 44cc3fc..eb986ee 100644
+--- a/src/ui-touch/UITask.cpp
++++ b/src/ui-touch/UITask.cpp
+@@ -154,6 +154,9 @@ static void* wadaMp3Scratch() { return s_wada_mp3_scratch; }
+ #include <Utils.h>
+ #include <LvglPsramAlloc.h>   // PSRAM-preferred alloc helpers for the map tile cache
+ #include "SnakeGame.h"        // Apps → Snake (self-contained game module)
++#if WADAMESH_KIWIX
++#include "kiwix_app.h"         // Apps → Kiwix: ZIM archives on the card, articles in the Reader
++#endif
+ #include "LuaHost.h"          // Lua app host (LUA_APPS.md; Phase 0 spike gate)
+ #include "LuaAppHost.h"       // sandboxed Lua apps (LUA_APPS.md Phase 1; self-gated on CAP_LUA_APPS)
+ 
+@@ -61975,6 +61978,9 @@ enum AppDrawerAction {
+   APPACT_TERMINAL, APPACT_FILES, APPACT_FILE_TRANSFER, APPACT_SPECTRUM, APPACT_SNAKE, APPACT_VNC, APPACT_REMOTE, APPACT_READER,
+   APPACT_DISCOVER, APPACT_STORE,
+   APPACT_USB_FILES,
++#if WADAMESH_KIWIX
++  APPACT_KIWIX,
++#endif
+   APPACT_LUA_BASE = 100,   // APPACT_LUA_BASE + i = installed Lua app s_lua_inst[i]
+ };
+ // The drawer's built-in tiles, which are also what an App widget on Home can open.
+@@ -62017,6 +62023,9 @@ static const AppTileDef k_app_tiles[] = {
+   { UI_ICON_GAMEPAD_2,          "Snake",     APPACT_SNAKE,     HUE_MSG },     // native snake (Lua boards install it from the Store)
+ #else
+   { UI_ICON_STORE,              "Store",     APPACT_STORE,     HUE_MSG },     // Lua app store
++#endif
++#if WADAMESH_KIWIX
++  { UI_ICON_FILE_TEXT,          "Kiwix",     APPACT_KIWIX,     HUE_SYS },     // ZIM archives on the card
+ #endif
+   { UI_ICON_HOUSE,              "Home",      APPACT_CMDCENTER, HUE_SYS },     // back to the Home widgets
+   { UI_ICON_POWER,              "Power",     APPACT_POWER,     kAppHueDanger },
+@@ -62401,6 +62410,9 @@ static void appLaunch(int act, lv_event_t* e) {
+ #else
+     case APPACT_SNAKE:     SnakeGame::launch();  return;
+ #endif
++#if WADAMESH_KIWIX
++    case APPACT_KIWIX:     KiwixApp::launch();   return;   // offline ZIM archives on the card
++#endif
+ #if defined(HAS_TOUCH_UI)
+     case APPACT_TERMINAL:  homeTerminalCb(e);    return;
+ #endif
+@@ -89760,3 +89772,17 @@ static void docAuditFocus() {
+ }
+ #endif
+ #endif  // DOC_CAPTURE
++
++// ---- Kiwix bridge ---------------------------------------------------------
++// firmware/tdeck-plus/kiwix/kiwix_app.cpp writes one ZIM article out as local
++// HTML on the card and calls this. Handing it to the Reader that already ships
++// here means scrolling, keyboard/trackball navigation and the back bar are the
++// firmware's own, not a second document renderer. Declared extern "C" in
++// kiwix_app.cpp so the name does not depend on C++ mangling.
++#if WADAMESH_KIWIX
++// The Reader itself is built when MULTI_TRANSPORT_COMPANION is on (it is on the
++// T-Deck); the guard keeps this file compiling on envs that have no Reader.
++#if defined(ESP32) && defined(MULTI_TRANSPORT_COMPANION)
++extern "C" void wadameshOpenReaderUrl(const char* url) { openReaderPage(url); }
++#endif
++#endif

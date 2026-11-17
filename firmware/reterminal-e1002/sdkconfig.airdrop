@@ -1,0 +1,17 @@
+# Extra sdkconfig for the AirDrop-enabled reTerminal E1002 build.
+# Appended after the upstream defaults (see build.sh), so it only overrides or
+# adds what the AirDrop boot window needs.
+
+# AWDL speaks IPv6 only: link-local addressing plus multicast for mDNS.
+CONFIG_LWIP_IPV6=y
+CONFIG_LWIP_IPV6_AUTOCONFIG=y
+CONFIG_LWIP_IPV6_NUM_ADDRESSES=4
+
+# ESP32Drop runs a TLS listener (mbedTLS) with a 32 KB task stack and needs
+# internal RAM for the handshake, not just PSRAM.
+CONFIG_MBEDTLS_SSL_PROTO_TLS1_2=y
+CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC=y
+
+# The bridge runs from app_main; ESP32Drop's own listener task is created by
+# ad_begin(), so the main task only needs room for the poll loop.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192

@@ -1,0 +1,14 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 2fe031d..99191cf 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -53,5 +53,9 @@ execute_process(
+     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+ )
+ 
++# Pick up components that live beside the upstream checkout (see
++# patches/esp32-photoframe/0001-build-allow-external-components.patch).
++list(APPEND EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../../components")
++
+ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+ project(esp32-photoframe)
