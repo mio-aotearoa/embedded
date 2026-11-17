@@ -50,6 +50,7 @@ class KiwixApp
     static void catalogItemCb(lv_event_t *e);
     static void catalogUpCb(lv_event_t *e);
     static void imeToggleCb(lv_event_t *e);
+    static void catalogTickCb(lv_timer_t *t);
     static void fieldBindCb(lv_event_t *e);
     static void destroyAsync(void *p);
 
@@ -62,6 +63,8 @@ class KiwixApp
     lv_obj_t *search_ = nullptr;
     lv_obj_t *url_ = nullptr;
     lv_timer_t *dlTimer_ = nullptr;
+    lv_timer_t *catTimer_ = nullptr;
+    size_t catRows_ = 0;   // rows are only built once the listing has arrived
 
     ZimArchive archive_;
     char archivePaths_[kMaxFiles][192] = {};

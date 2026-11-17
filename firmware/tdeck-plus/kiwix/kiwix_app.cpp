@@ -361,6 +361,11 @@ void KiwixApp::close(void)
         lv_timer_del(dlTimer_);
         dlTimer_ = nullptr;
     }
+    if (catTimer_)
+    {
+        lv_timer_del(catTimer_);
+        catTimer_ = nullptr;
+    }
     appPageBindTextField(nullptr);       // a field of ours is about to go away
     appPageEnd(&KiwixApp::dismiss);      // hand the status bar back
     appPageDeleteRootAsync(root_);       // never a sync delete from a callback
@@ -575,47 +580,77 @@ void KiwixApp::imeToggleCb(lv_event_t* e)
 }
 
 // One row per folder/archive of the mirror's index, browsed a level at a time.
+// The listing is fetched on a worker task; this only starts it and clears the
+// list, and catalogTickCb fills the rows when the answer is in.
 void KiwixApp::showCatalogue(const char* dir)
 {
     catDir_ = dir ? dir : "";
     catItems_.clear();
+    catRows_ = 0;
     lv_obj_clean(list_);
     if (search_) lv_obj_add_flag(search_, LV_OBJ_FLAG_HIDDEN);
     if (url_) lv_obj_add_flag(url_, LV_OBJ_FLAG_HIDDEN);
     if (list_) lv_obj_clear_flag(list_, LV_OBJ_FLAG_HIDDEN);
     appPageBindTextField(nullptr);
 
-    setStatus(TR("Loading the catalogue\xE2\x80\xA6"));
-    lv_refr_now(nullptr);   // the fetch blocks the LVGL task: paint this first
-
-    char err[96];
-    if (!kiwixCatalogFetch(catDir_.c_str(), catItems_, err, sizeof err))
+    if (!kiwixCatalogStart(catDir_.c_str()))
     {
-        catItems_.clear();
-        setStatus(err);
-        lv_obj_t* back = lv_list_add_btn(list_, LV_SYMBOL_LEFT, TR("Back to archives"));
+        setStatus(TR("The catalogue is already loading"));
+        return;
+    }
+    setStatus(TR("Loading the catalogue\xE2\x80\xA6"));
+    if (!catTimer_) catTimer_ = lv_timer_create(catalogTickCb, 200, nullptr);
+}
+
+void KiwixApp::catalogTickCb(lv_timer_t* t)
+{
+    (void)t;
+    KiwixApp* app = s_active;
+    if (!app) return;
+    const KiwixCatalogState& st = kiwixCatalogState();
+    if (st.running || !st.done) return;
+
+    const bool ok = st.ok;
+    char err[96];
+    snprintf(err, sizeof err, "%s", st.err);
+    const std::vector<KiwixCatalogItem>* items = st.items;
+    kiwixCatalogClearDone();
+
+    if (app->catTimer_)
+    {
+        lv_timer_del(app->catTimer_);
+        app->catTimer_ = nullptr;
+    }
+
+    if (!ok)
+    {
+        app->setStatus(err);
+        lv_obj_t* back = lv_list_add_btn(app->list_, LV_SYMBOL_LEFT, TR("Back to archives"));
         if (back) lv_obj_add_event_cb(back, catalogUpCb, LV_EVENT_CLICKED, nullptr);
         return;
     }
 
-    if (!catDir_.empty())
+    if (items) app->catItems_ = *items;
+    app->catRows_ = app->catItems_.size();
+
+    if (!app->catDir_.empty())
     {
-        lv_obj_t* up = lv_list_add_btn(list_, LV_SYMBOL_UP, "..");
+        lv_obj_t* up = lv_list_add_btn(app->list_, LV_SYMBOL_UP, "..");
         if (up) lv_obj_add_event_cb(up, catalogUpCb, LV_EVENT_CLICKED, nullptr);
     }
-    for (size_t i = 0; i < catItems_.size(); ++i)
+    for (size_t i = 0; i < app->catItems_.size(); ++i)
     {
-        const KiwixCatalogItem& it = catItems_[i];
+        const KiwixCatalogItem& it = app->catItems_[i];
         char label[140];
         if (it.isDir) snprintf(label, sizeof label, "%s", it.name);
         else if (it.size[0]) snprintf(label, sizeof label, "%s  (%s)", it.name, it.size);
         else snprintf(label, sizeof label, "%s", it.name);
-        lv_obj_t* row = lv_list_add_btn(list_, it.isDir ? LV_SYMBOL_DIRECTORY : LV_SYMBOL_DOWNLOAD, label);
+        lv_obj_t* row = lv_list_add_btn(app->list_, it.isDir ? LV_SYMBOL_DIRECTORY : LV_SYMBOL_DOWNLOAD, label);
         if (row) lv_obj_add_event_cb(row, catalogItemCb, LV_EVENT_CLICKED, (void*)(uintptr_t)(i + 1));
     }
     char msg[48];
-    snprintf(msg, sizeof msg, TR("%u entries"), (unsigned)catItems_.size());
-    setStatus(msg);
+    snprintf(msg, sizeof msg, TR("%u entries"), (unsigned)app->catRows_);
+    app->setStatus(msg);
 }
 
 void KiwixApp::catalogueCb(lv_event_t* e)

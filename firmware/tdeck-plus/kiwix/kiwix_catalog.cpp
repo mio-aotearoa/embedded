@@ -3,6 +3,8 @@
 
 #include <Arduino.h>
 #include <HTTPClient.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 
@@ -190,38 +192,76 @@ void parseListing(const std::string& html, std::vector<KiwixCatalogItem>& out)
 }
 }  // namespace
 
-bool kiwixCatalogFetch(const char* dir, std::vector<KiwixCatalogItem>& out,
-                       char* err, size_t errLen)
+namespace
 {
-    out.clear();
-    if (!err || errLen == 0) return false;
-    err[0] = '\0';
+std::vector<KiwixCatalogItem> s_items;
+KiwixCatalogState s_state;
+char s_dir[192];
+
+void catalogTask(void*)
+{
+    std::vector<KiwixCatalogItem> items;
+    char err[96] = {};
+    bool ok = false;
     if (WiFi.status() != WL_CONNECTED)
     {
-        snprintf(err, errLen, "Connect to Wi-Fi first");
-        return false;
-    }
-
-    char url[256];
-    const char* leaf = dir ? dir : "";
-    while (*leaf == '/') ++leaf;
-    if (*leaf)
-    {
-        snprintf(url, sizeof url, "%s%s/", kBase, leaf);
+        snprintf(err, sizeof err, "Connect to Wi-Fi first");
     }
     else
     {
-        snprintf(url, sizeof url, "%s", kBase);
+        char url[256];
+        const char* leaf = s_dir;
+        while (*leaf == '/') ++leaf;
+        if (*leaf) snprintf(url, sizeof url, "%s%s/", kBase, leaf);
+        else       snprintf(url, sizeof url, "%s", kBase);
+
+        std::string html;
+        ok = readPage(url, html, err, sizeof err);
+        if (ok)
+        {
+            parseListing(html, items);
+            if (items.empty())
+            {
+                snprintf(err, sizeof err, "No archives in this folder");
+                ok = false;
+            }
+        }
     }
+    if (ok) s_items.swap(items);
+    else    s_items.clear();
+    snprintf(s_state.err, sizeof s_state.err, "%s", ok ? "" : err);
+    s_state.items = &s_items;
+    s_state.ok = ok;
+    s_state.running = false;
+    s_state.done = true;
+    vTaskDelete(nullptr);
+}
+}  // namespace
 
-    std::string html;
-    if (!readPage(url, html, err, errLen)) return false;
-
-    parseListing(html, out);
-    if (out.empty())
+bool kiwixCatalogStart(const char* dir)
+{
+    if (s_state.running) return false;
+    const char* leaf = dir ? dir : "";
+    if (strlen(leaf) >= sizeof s_dir) return false;
+    snprintf(s_dir, sizeof s_dir, "%s", leaf);
+    s_state.running = true;
+    s_state.done = false;
+    s_state.ok = false;
+    s_state.err[0] = '\0';
+    if (xTaskCreate(catalogTask, "kicat", 10240, nullptr, 1, nullptr) != pdPASS)
     {
-        snprintf(err, errLen, "No archives in this folder");
+        s_state.running = false;
         return false;
     }
     return true;
+}
+
+const KiwixCatalogState& kiwixCatalogState(void) { return s_state; }
+
+void kiwixCatalogClearDone(void)
+{
+    if (s_state.running) return;
+    s_state.done = false;
+    s_state.ok = false;
+    s_state.err[0] = '\0';
 }

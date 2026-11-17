@@ -17,12 +17,21 @@ struct KiwixCatalogItem
     bool isDir;
 };
 
-// Fetches one directory listing. `dir` is "" for /zim/ itself, else a path such
-// as "wikipedia" or "wikipedia/wikipedia_en_all_nopic".
-//
-// Blocking (call it from the LVGL task with a status already painted). It
-// follows redirects by hand because the mirror 302s to lb.download.kiwix.org and
+struct KiwixCatalogState
+{
+    volatile bool running;   // a listing is being fetched
+    volatile bool done;      // cleared by kiwixCatalogClearDone()
+    volatile bool ok;        // with done: `items` holds the listing
+    char err[96];            // readable reason when !ok
+    const std::vector<KiwixCatalogItem>* items;  // owned by this module, valid while done
+};
+
+// Starts fetching one directory listing on a worker task, so the LVGL task keeps
+// drawing while the mirror answers. `dir` is "" for /zim/ itself, else a path
+// such as "wikipedia" or "wikipedia/wikipedia_en_all_nopic".
+// Returns false when a fetch is already running (or the arguments are bad).
+// Redirects are followed by hand: the mirror 302s to lb.download.kiwix.org, and
 // HTTPClient cannot re-connect an explicit WiFiClientSecure across hosts.
-// Returns false and writes a readable reason to `err` on failure.
-bool kiwixCatalogFetch(const char* dir, std::vector<KiwixCatalogItem>& out,
-                       char* err, size_t errLen);
+bool kiwixCatalogStart(const char* dir);
+const KiwixCatalogState& kiwixCatalogState(void);
+void kiwixCatalogClearDone(void);
