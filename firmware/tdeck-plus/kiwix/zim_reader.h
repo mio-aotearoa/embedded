@@ -55,6 +55,10 @@ class ZimArchive
     std::vector<ZimEntry> searchTitles(const char *prefix, size_t limit);
     bool findByTitle(const char *prefix, ZimEntry &out);
 
+    // Look up a dirent by full "N/path" (namespace letter, slash, path), the
+    // form ZIM HTML uses for images: "I/foo.jpg" or "../I/foo.jpg".
+    bool findByPath(const char *fullPath, ZimEntry &out);
+
     bool readBlob(const ZimEntry &entry, std::vector<uint8_t> &out, char *err, size_t errCap);
 
   private:

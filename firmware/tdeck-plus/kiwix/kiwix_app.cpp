@@ -13,9 +13,12 @@
 #include "AppPage.h"     // wadamesh app-page chrome: root, "< title" bar, async teardown
 #include "i18n.h"        // TR()
 #include "zim_reader.h"  // ZIM v5/v6 parser (this folder)
+#include "src/extra/libs/sjpg/tjpgd.h"  // wadamesh's JPEG decoder (same copy UITask uses)
 
 #include <Arduino.h>  // SD is pulled in from here on this core
 #include <SD.h>
+#include <ctype.h>
+#include <esp_heap_caps.h>
 #include <lvgl.h>
 
 #include <stdio.h>
@@ -35,6 +38,160 @@ constexpr const char* kSdMount = "/sd";
 constexpr size_t kMaxArticleBytes = 220 * 1024;
 constexpr const char* kWorkDir = "/meshcomod/kiwix";
 constexpr const char* kArticleUrl = "sd:/meshcomod/kiwix/article.htm";
+
+// ---- article images -------------------------------------------------------
+// ZIM HTML points at images with ZIM paths ("../I/foo.jpg"). The Reader is a
+// text renderer, so the first image is shown here, decoded with the tjpgd copy
+// wadamesh already builds, before handing the article to the Reader.
+static lv_obj_t* s_imgOverlay = nullptr;
+static lv_img_dsc_t s_imgDsc;
+static uint8_t* s_imgBuf = nullptr;
+
+struct JpgIo { const uint8_t* data; size_t len; size_t pos; uint16_t* out; int ow; int oh; };
+
+extern "C" {
+static size_t jpgIn(JDEC* jd, uint8_t* buf, size_t n)
+{
+    JpgIo* io = (JpgIo*)jd->device;
+    size_t avail = io->len - io->pos;
+    if (n > avail) n = avail;
+    if (buf) memcpy(buf, io->data + io->pos, n);
+    io->pos += n;
+    return n;
+}
+static int jpgOut(JDEC* jd, void* bitmap, JRECT* r)
+{
+    JpgIo* io = (JpgIo*)jd->device;
+    const uint8_t* s = (const uint8_t*)bitmap;
+    for (int y = (int)r->top; y <= (int)r->bottom; ++y)
+    {
+        uint16_t* d = (y < io->oh) ? io->out + (size_t)y * io->ow + (int)r->left : nullptr;
+        for (int x = (int)r->left; x <= (int)r->right; ++x)
+        {
+            if (d && x < io->ow)
+            {
+                lv_color_t c = lv_color_make(s[0], s[1], s[2]);
+                *d++ = c.full;
+            }
+            s += 3;
+        }
+    }
+    return 1;
+}
+}  // extern "C"
+
+static void imageTapCb(lv_event_t*)
+{
+    if (s_imgOverlay)
+    {
+        lv_obj_del(s_imgOverlay);
+        s_imgOverlay = nullptr;
+    }
+    if (s_imgBuf)
+    {
+        heap_caps_free(s_imgBuf);
+        s_imgBuf = nullptr;
+    }
+    KiwixApp::dismiss();
+    wadameshOpenReaderUrl(kArticleUrl);
+}
+
+static bool showArticleImage(ZimArchive& ar, const std::string& src, const ZimEntry& article)
+{
+    std::string path;
+    if (src.compare(0, 5, "data:") == 0 || src.compare(0, 4, "http") == 0) return false;
+    size_t cut = src.find_first_of("?#");
+    path = src.substr(0, cut);
+    while (path.compare(0, 3, "../") == 0) path.erase(0, 3);
+    if (path.compare(0, 2, "./") == 0) path.erase(0, 2);
+    if (!(path.size() > 2 && path[1] == '/'))
+    {
+        std::string base(1, article.ns);
+        base += '/'; base += article.path;
+        const size_t slash = base.rfind('/');
+        base.resize(slash == std::string::npos ? 2 : slash + 1);
+        path = base + path;
+    }
+    if (path.size() < 4) return false;
+    std::string lower = path;
+    for (char& c : lower) c = (char)tolower((unsigned char)c);
+    if (lower.size() < 5 || (lower.rfind(".jpg") != lower.size() - 4 &&
+                             lower.rfind(".jpeg") != lower.size() - 5)) return false;
+
+    ZimEntry img;
+    if (!ar.findByPath(path.c_str(), img) || !ar.resolve(img, img)) return false;
+    std::vector<uint8_t> jpeg;
+    char err[96];
+    if (!ar.readBlob(img, jpeg, err, sizeof err) || jpeg.size() < 4 ||
+        jpeg[0] != 0xFF || jpeg[1] != 0xD8) return false;
+
+    static uint8_t* pool = nullptr;
+    if (!pool)
+    {
+        pool = (uint8_t*)heap_caps_malloc(4096, MALLOC_CAP_SPIRAM);
+        if (!pool) pool = (uint8_t*)heap_caps_malloc(4096, MALLOC_CAP_8BIT);
+    }
+    if (!pool) return false;
+    JpgIo io{jpeg.data(), jpeg.size(), 0, nullptr, 0, 0};
+    JDEC jd;
+    if (jd_prepare(&jd, jpgIn, pool, 4096, &io) != JDR_OK) return false;
+    int scale = 0;
+    const int maxDim = 300;
+    while (scale < 3 && (((int)jd.width >> scale) > maxDim || ((int)jd.height >> scale) > maxDim)) ++scale;
+    const int ow = (int)jd.width >> scale, oh = (int)jd.height >> scale;
+    if (ow <= 0 || oh <= 0 || ow > maxDim || oh > maxDim) return false;
+    s_imgBuf = (uint8_t*)heap_caps_malloc((size_t)ow * oh * 2, MALLOC_CAP_SPIRAM);
+    if (!s_imgBuf) s_imgBuf = (uint8_t*)heap_caps_malloc((size_t)ow * oh * 2, MALLOC_CAP_8BIT);
+    if (!s_imgBuf) return false;
+    io.out = (uint16_t*)s_imgBuf; io.ow = ow; io.oh = oh;
+    if (jd_decomp(&jd, jpgOut, (uint8_t)scale) != JDR_OK)
+    {
+        heap_caps_free(s_imgBuf); s_imgBuf = nullptr;
+        return false;
+    }
+
+    memset(&s_imgDsc, 0, sizeof s_imgDsc);
+    s_imgDsc.header.cf = LV_IMG_CF_TRUE_COLOR;
+    s_imgDsc.header.w = ow; s_imgDsc.header.h = oh;
+    s_imgDsc.data_size = (uint32_t)ow * oh * 2;
+    s_imgDsc.data = s_imgBuf;
+
+    s_imgOverlay = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(s_imgOverlay, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(s_imgOverlay, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(s_imgOverlay, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(s_imgOverlay, 0, 0);
+    lv_obj_clear_flag(s_imgOverlay, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(s_imgOverlay, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(s_imgOverlay, imageTapCb, LV_EVENT_CLICKED, nullptr);
+    lv_obj_t* im = lv_img_create(s_imgOverlay);
+    lv_img_set_src(im, &s_imgDsc);
+    lv_obj_center(im);
+    lv_obj_t* hint = lv_label_create(s_imgOverlay);
+    lv_label_set_text(hint, "Tap for article");
+    lv_obj_set_style_text_color(hint, lv_color_hex(0xE0E0E0), 0);
+    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -6);
+    return true;
+}
+
+static bool firstImageSrc(const std::vector<uint8_t>& html, std::string& out)
+{
+    const std::string text(html.begin(), html.end());
+    size_t pos = 0;
+    while ((pos = text.find("<img", pos)) != std::string::npos)
+    {
+        size_t src = text.find("src", pos);
+        size_t end = text.find('>', pos);
+        if (src == std::string::npos || (end != std::string::npos && src > end)) { pos += 4; continue; }
+        size_t q = text.find_first_of("\"'", src);
+        if (q == std::string::npos) { pos += 4; continue; }
+        size_t qe = text.find(text[q], q + 1);
+        if (qe == std::string::npos) { pos += 4; continue; }
+        out = text.substr(q + 1, qe - q - 1);
+        return !out.empty();
+    }
+    return false;
+}
 
 bool endsWithZim(const char* name)
 {
@@ -275,6 +432,8 @@ void KiwixApp::openArticle(const char* title)
         setStatus(TR("Article too large"));
         return;
     }
+    std::string imageSrc;
+    const bool hasImage = firstImageSrc(html, imageSrc);
     stripAnchors(html);
 
     SD.mkdir("/meshcomod");
@@ -288,7 +447,10 @@ void KiwixApp::openArticle(const char* title)
     out.write(html.data(), html.size());
     out.close();
 
-    // Leave this page, then hand the file to the firmware's Reader.
+    // Show the article's first image (if any) before the Reader takes over;
+    // a tap continues to the article. No image: go straight to the Reader.
+    if (hasImage && showArticleImage(archive_, imageSrc, entry)) return;
+
     dismiss();
     wadameshOpenReaderUrl(kArticleUrl);
 }

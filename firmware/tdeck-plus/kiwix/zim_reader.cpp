@@ -354,6 +354,51 @@ bool ZimArchive::findByTitle(const char *prefix, ZimEntry &out)
     return resolve(results[0], out);
 }
 
+bool ZimArchive::findByPath(const char *fullPath, ZimEntry &out)
+{
+    if (!fullPath || fullPath[0] == '\0' || fullPath[1] != '/')
+    {
+        return false;
+    }
+    const char ns = fullPath[0];
+    const char *path = fullPath + 2;
+
+    // The path pointer list is sorted by (namespace, path).
+    uint32_t lo = 0, hi = _entryCount;
+    while (lo < hi)
+    {
+        const uint32_t mid = lo + (hi - lo) / 2;
+        ZimEntry e;
+        if (!direntAt(mid, e))
+        {
+            return false;
+        }
+        int cmp;
+        if (e.ns != ns)
+        {
+            cmp = (unsigned char)e.ns < (unsigned char)ns ? -1 : 1;
+        }
+        else
+        {
+            cmp = strcmp(e.path.c_str(), path);
+        }
+        if (cmp == 0)
+        {
+            out = e;
+            return true;
+        }
+        if (cmp < 0)
+        {
+            lo = mid + 1;
+        }
+        else
+        {
+            hi = mid;
+        }
+    }
+    return false;
+}
+
 bool ZimArchive::readCluster(uint32_t cluster, std::vector<uint8_t> &out, char *err, size_t errCap)
 {
     if (cluster >= _clusterCount) {
