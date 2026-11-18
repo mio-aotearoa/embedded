@@ -1,0 +1,2 @@
+# Exclusive boot-time Wi-Fi / AirDrop selection.
+# CONFIG_AIRDROP_COEX is not set

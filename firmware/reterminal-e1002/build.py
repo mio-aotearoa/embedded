@@ -1,26 +1,16 @@
 #!/usr/bin/env python3
 """Build the AirDrop-enabled reTerminal E1002 firmware variants.
 
-Two images are produced from the same source with different sdkconfig
-fragments:
+Builds isolated switch (alias: airdrop) and experimental coex images.
+By default, prepares upstream webapp/splash assets and builds both variants.
+Requires ESP-IDF, npm, and initialised submodules.
 
-  airdrop  AWDL owns the radio during the boot window (shipped behaviour,
-           deterministic; Wi-Fi and AirDrop are sequential).
-  coex     Experimental: vendor coexistence enabled, both stacks initialised;
-           AWDL timing and HTTP throughput are expected to degrade. The port
-           still needs the APSTA/session-gating work, so treat this as the
-           development seam, not a usable simultaneous mode.
-
-Usage:
-  firmware/reterminal-e1002/build.py                 # both variants
-  firmware/reterminal-e1002/build.py airdrop         # one variant
-  firmware/reterminal-e1002/build.py all --build-dir /tmp/e1002
-
-Requires ESP-IDF (idf.py on PATH) and the pre-built web UI/splash assets
-(upstream's `python3 build.py --step webapp --step splash`).
 """
 
 import argparse
+import hashlib
+import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -29,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PHOTOFRAME = ROOT / "third_party" / "esp32-photoframe"
 BOARD = "seeedstudio_reterminal_e1002"
 VARIANTS = {
-    "airdrop": "sdkconfig.airdrop",
+    "switch": "sdkconfig.switch",
     "coex": "sdkconfig.coex",
 }
 REQUIRED_ASSETS = [
@@ -65,12 +55,14 @@ def check_assets():
 
 def build_variant(name, build_dir):
     fragment = ROOT / "firmware" / "reterminal-e1002" / VARIANTS[name]
-    out = Path(build_dir) / f"e1002-{name}"
+    out = Path(build_dir).resolve() / f"e1002-{name}"
+    out.mkdir(parents=True, exist_ok=True)
     defaults = ";".join(
         str(p)
         for p in (
             PHOTOFRAME / "sdkconfig.defaults",
             PHOTOFRAME / "boards" / f"sdkconfig.defaults.{BOARD}",
+            ROOT / "firmware" / "reterminal-e1002" / "sdkconfig.airdrop",
             fragment,
         )
     )
@@ -82,6 +74,7 @@ def build_variant(name, build_dir):
             "-B", out,
             "-D", "IDF_TARGET=esp32s3",
             "-D", f"SDKCONFIG_DEFAULTS={defaults}",
+            "-D", f"SDKCONFIG={out / 'sdkconfig'}",
             "-D", f"FIRMWARE_VERSION={version}",
             "build",
         ]
@@ -89,23 +82,57 @@ def build_variant(name, build_dir):
     return out / "esp32-photoframe.bin"
 
 
+def package_variant(name, app_path):
+    out = app_path.parent
+    merged = out / "firmware.bin"
+    run(["idf.py", "-C", PHOTOFRAME, "-B", out,
+         "merge-bin", "-o", merged])
+    manifest = {
+        "variant": name,
+        "board": BOARD,
+        "flash_offset": "0x0",
+        "artifacts": {
+            path.name: {
+                "bytes": path.stat().st_size,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+            for path in (app_path, merged)
+        },
+    }
+    (out / "firmware-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    return merged
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("variant", nargs="?", default="all",
-                        choices=["all", *VARIANTS])
+                        choices=["all", "airdrop", *VARIANTS])
     parser.add_argument("--build-dir", default=str(ROOT / "build"))
+    parser.add_argument("--skip-assets", action="store_true",
+                        help="Reuse generated webapp and splash assets")
     args = parser.parse_args()
+
+    if not shutil.which("idf.py"):
+        sys.exit("idf.py not found; source ESP-IDF release-v6.0 export.sh first")
 
     if not (PHOTOFRAME / "main").is_dir():
         sys.exit("third_party/esp32-photoframe is missing; run git submodule update --init")
 
-    run([ROOT / "scripts" / "patches.sh", "apply", "esp32-photoframe"])
+    if not (ROOT / "third_party/ESP32Drop/ESP32Drop/src/awdl/port/awdl_port_esp32.cpp").is_file():
+        sys.exit("third_party/ESP32Drop is missing; run git submodule update --init")
+
+    run([ROOT / "scripts" / "patches.sh", "apply", "esp32-photoframe", "ESP32Drop"])
+    if not args.skip_assets:
+        run([sys.executable, "build.py", "--board", BOARD,
+             "--step", "webapp", "--step", "splash"], cwd=PHOTOFRAME)
     check_assets()
 
-    names = list(VARIANTS) if args.variant == "all" else [args.variant]
+    variant = "switch" if args.variant == "airdrop" else args.variant
+    names = list(VARIANTS) if variant == "all" else [variant]
     for name in names:
         bin_path = build_variant(name, args.build_dir)
-        print(f"{name}: {bin_path} ({bin_path.stat().st_size} bytes)", flush=True)
+        merged = package_variant(name, bin_path)
+        print(f"{name}: {merged} ({merged.stat().st_size} bytes; flash at 0x0)", flush=True)
 
 
 if __name__ == "__main__":

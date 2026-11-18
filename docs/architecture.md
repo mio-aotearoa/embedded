@@ -260,67 +260,16 @@ the fallback. The engines that could have replaced it — eBrowser, Agave — an
 what each would cost in flash, build integration and LVGL version are compared
 in [`web-browser-options.md`](web-browser-options.md).
 
-## Firmware 2 — reTerminal E1002: photoframe + AirDrop
+## Firmware 2 — reTerminal E1002
 
-### The radio is the constraint
+The [E1002 build instructions](../firmware/reterminal-e1002/README.md) describe
+both variants and their limits. `components/airdrop_bridge` connects
+ESP32Drop's receiver to photoframe's existing display pipeline. The Arduino
+shim is in `components/esp32drop_compat`.
 
-ESP32Drop's AWDL implementation holds 2.4 GHz channel 6 permanently to stay in
-step with the AWDL availability window. It cannot coexist with
-`WiFi.begin()`, and esp32-photoframe is a Wi-Fi device (HTTP API, URL rotation,
-SNTP). The only correct composition is time-multiplexing at boot:
-
-```
-power on + trigger button held
-        |
-        v
-  airdrop_bridge: esp_netif + AWDL + TLS listener (no Wi-Fi station)
-        |  receive one AirDrop transfer -> /storage/images/airdrop-<id>.<ext>
-        v
-  photoframe image pipeline (image_processor/display_flow)
-        |
-        v
-  deep sleep
-```
-
-Without the trigger the firmware boots exactly as upstream photoframe.
-
-### Why a boot mode and not a background service
-
-`ad_begin()` binds a TLS listener to the link-local address the AWDL netif
-owns and takes a 32 KB contiguous internal-RAM task stack. Starting it beside
-photoframe's Wi-Fi stack would (a) fail the radio claim and (b) risk the
-internal-RAM budget mbedTLS needs. A boot window that ends in a display refresh
-and deep sleep is the composition that keeps both projects inside their stated
-constraints.
-
-### ESP32Drop in an ESP-IDF build
-
-ESP32Drop is an Arduino library, but its actual dependencies are narrow: the
-two port files include `<Arduino.h>` for `millis()` (plus comments about
-`Serial`, which the library deliberately does not own) and otherwise use
-ESP-IDF APIs directly. `components/esp32drop_compat/include/Arduino.h` provides
-`millis()`, `micros()`, `delay()`, `delayMicroseconds()` and a staged `Serial`
-sink. No upstream source is changed.
-
-The receive build is only two translation units:
-
-* `ESP32Drop/src/awdl/port/awdl_port_esp32.cpp`
-* `ESP32Drop/src/airdrop/port/ad_port_esp32.cpp`
-
-(the core codecs are header-only, and the sender/BLE files are not compiled).
-
-### photoframe changes (patch series)
-
-`patches/esp32-photoframe/`:
-
-1. `0001-build-allow-external-components.patch` — lets the upstream CMake project
-   pick up this repository's `components/` directory. One line.
-2. `0002-airdrop-boot-window.patch` — adds the component to `main`'s
-   `PRIV_REQUIRES` and a short boot hook in `app_main` that runs the AirDrop
-   window and hands the file to `display_flow_stream_file()`.
-
-Everything else (storage, image processing, palette, deep sleep, HTTP API) is
-upstream, untouched.
+`patches/ESP32Drop/` adds APSTA radio ownership, listener shutdown and Mbed TLS 4
+compatibility. `patches/esp32-photoframe/` adds variant hooks, HTTP mutation
+and sleep/rotation guards, and configuration-aware partition generation.
 
 ## Build with Nix
 
@@ -451,9 +400,8 @@ so this repository does not claim a speed-up: measure with the existing
 ## Verification status
 
 The T-Deck Plus image is compiled and linked with the pinned toolchain
-(PlatformIO/espressif32 6.11.0, `LilyGo_TDeck_companion_radio_touch`). The
-E1002 image has not been compiled: it needs the ESP-IDF S3 toolchain. Nothing
-has been flashed or run on hardware. What was actually checked:
+(PlatformIO/espressif32 6.11.0, `LilyGo_TDeck_companion_radio_touch`). Both E1002 variants compile and link with ESP-IDF 6.0.3 / GCC 15.3.0.
+Nothing has been flashed or run on hardware. What was actually checked:
 
 * `scripts/patches.sh apply|status|revert` round-trips both series against the
   pinned commits and leaves the submodules clean.
@@ -479,18 +427,13 @@ has been flashed or run on hardware. What was actually checked:
   `Esp32AiApp::launch()`, `ZimArchive::searchTitles()` and
   `httpDownloadStart()` in the ELF.
 
-Not checked: ESP-IDF compilation of the AirDrop listener, and any hardware
-behaviour — Wi-Fi download throughput, TLS handshakes, SD write failures at
+Not checked: hardware behaviour — Wi-Fi download throughput, TLS handshakes, SD write failures at
 the end of a large file, the Reader's rendering of a downloaded article, and
 esp32-ai token generation.
 
 ## Known gaps / next steps
 
-* First build on a machine with the toolchains; expect API drift fixes in
-  `kiwix_app.cpp` (LVGL 8 list/textarea calls, matching wadamesh's pinned
-  LVGL) and in the bridge.
-* AirDrop file types other than JPEG/PNG are written to storage and reported in
-  the log, not displayed.
+* AirDrop accepts JPEG/PNG; other image formats are rejected.
 * Kiwix: article images/CSS and full-text search are out of scope; LZMA2
   archives need a zstd re-export.
 * `patches.sh rebase` uses `git apply --3way`; conflicts are resolved in the

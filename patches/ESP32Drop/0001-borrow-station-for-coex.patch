@@ -1,0 +1,321 @@
+diff --git a/ESP32Drop/src/airdrop/port/ad_port_esp32.cpp b/ESP32Drop/src/airdrop/port/ad_port_esp32.cpp
+index e2d574f..eec38b6 100644
+--- a/ESP32Drop/src/airdrop/port/ad_port_esp32.cpp
++++ b/ESP32Drop/src/airdrop/port/ad_port_esp32.cpp
+@@ -1,3 +1,4 @@
++#include <atomic>
+ /* ⚠️ THE RECEIVING HALF, AND IT IS ABSENT FROM A SENDER BUILD.
+  *
+  * Everything below compiles only when ESP32DROP_SENDER is NOT defined. The two roles cannot
+@@ -48,8 +49,11 @@
+ #include "esp_heap_caps.h"    /* heap_caps_malloc(..., MALLOC_CAP_SPIRAM): decode in PSRAM */
+ 
+ #include "mbedtls/ssl.h"
++#include "mbedtls/build_info.h"
++#if MBEDTLS_VERSION_MAJOR < 4
+ #include "mbedtls/entropy.h"
+ #include "mbedtls/ctr_drbg.h"
++#endif
+ #include "mbedtls/x509_crt.h"
+ #include "mbedtls/pk.h"
+ #include "mbedtls/net_sockets.h"
+@@ -657,8 +661,10 @@ static volatile uint32_t g_rx_max_eff  = 0;             /* what a transfer actua
+ // these three live OUTSIDE the guard below.
+ static const char              *g_tls_alg = "none";   // "EC"/"RSA" once cert loads
+ static int                      g_ec_crt_err = 0, g_ec_key_err = 0;  // why EC fell back
++#if MBEDTLS_VERSION_MAJOR < 4
+ static mbedtls_entropy_context  g_entropy;
+ static mbedtls_ctr_drbg_context g_ctr_drbg;
++#endif
+ static mbedtls_x509_crt         g_srvcert;
+ static mbedtls_pk_context       g_pkey;
+ static mbedtls_ssl_config       g_tlsconf;
+@@ -697,6 +703,15 @@ static int tls_cache_set_probe(void *data, unsigned char const *id, size_t idlen
+ }
+ #endif  /* AD_DIAG_DETAIL */
+ 
++static int ad_parse_key(mbedtls_pk_context *key, const unsigned char *data, size_t len) {
++#if MBEDTLS_VERSION_MAJOR >= 4
++  return mbedtls_pk_parse_key(key, data, len, nullptr, 0);
++#else
++  return mbedtls_pk_parse_key(key, data, len, nullptr, 0,
++                             mbedtls_ctr_drbg_random, &g_ctr_drbg);
++#endif
++}
++
+ static void airdrop_tls_init() {
+   if (g_tls_ready) return;
+   /* A RETRY MUST GIVE BACK WHAT THE LAST ATTEMPT TOOK.
+@@ -721,22 +736,31 @@ static void airdrop_tls_init() {
+     mbedtls_ssl_config_free(&g_tlsconf);
+     mbedtls_pk_free(&g_pkey);
+     mbedtls_x509_crt_free(&g_srvcert);
++#if MBEDTLS_VERSION_MAJOR < 4
+     mbedtls_ctr_drbg_free(&g_ctr_drbg);
+     mbedtls_entropy_free(&g_entropy);
++#endif
+   }
+   tried = true;
++#if MBEDTLS_VERSION_MAJOR < 4
+   mbedtls_entropy_init(&g_entropy);
+   mbedtls_ctr_drbg_init(&g_ctr_drbg);
++  const char *pers = "ESP32Drop-tls";
++#endif
+   mbedtls_x509_crt_init(&g_srvcert);
+   mbedtls_pk_init(&g_pkey);
+   mbedtls_ssl_config_init(&g_tlsconf);
+-  const char *pers = "ESP32Drop-tls";
+   int r;
+-  psa_crypto_init();   // some EC/PK paths route through PSA (MBEDTLS_PSA_CRYPTO_C on)
++  // Mbed TLS 4 uses PSA for randomness and no longer exposes entropy/CTR_DRBG.
++  if (psa_crypto_init() != PSA_SUCCESS) {
++    AD_LOG("[tls] PSA crypto initialisation failed\n");
++    return;
++  }
+   // EC P-256 cert: ECDSA sign is ~10-30ms vs RSA-2048's ~300ms. That speed is the
+   // whole game here: the response must be generated inside the ~52ms ch6 window so
+   // it reaches the sender before sharingd abandons the connection. (RSA sign blew
+   // past the window -> reply landed a window late -> handshake never converged.)
++#if MBEDTLS_VERSION_MAJOR < 4
+   if ((r = mbedtls_ctr_drbg_seed(&g_ctr_drbg, mbedtls_entropy_func, &g_entropy,
+         (const unsigned char *)pers, strlen(pers)))) {
+     /* SAY HOW MUCH ROOM THERE WAS. "[tls] seed -0x0034" cost an hour: it names the failure
+@@ -749,10 +773,10 @@ static void airdrop_tls_init() {
+            -r, (unsigned long)esp_get_free_internal_heap_size());
+     return;
+   }
++#endif
+   int ec_ok = 0, rc, rk;
+   rc = mbedtls_x509_crt_parse_der(&g_srvcert, AIRDROP_CRT_EC_DER, AIRDROP_CRT_EC_DER_LEN);
+-  rk = rc ? -1 : mbedtls_pk_parse_key(&g_pkey, AIRDROP_KEY_EC_DER, AIRDROP_KEY_EC_DER_LEN,
+-                    NULL, 0, mbedtls_ctr_drbg_random, &g_ctr_drbg);
++  rk = rc ? -1 : ad_parse_key(&g_pkey, AIRDROP_KEY_EC_DER, AIRDROP_KEY_EC_DER_LEN);
+   g_ec_crt_err = rc; g_ec_key_err = rk;
+   if (!rc && !rk) { ec_ok = 1; }
+   else AD_LOG("[tls] EC(DER) crt=-0x%04x key=-0x%04x -> RSA fallback\n", -rc, -rk);
+@@ -762,15 +786,17 @@ static void airdrop_tls_init() {
+     mbedtls_pk_free(&g_pkey); mbedtls_pk_init(&g_pkey);
+     if ((r = mbedtls_x509_crt_parse(&g_srvcert, (const unsigned char *)AIRDROP_CRT_RSA,
+           strlen(AIRDROP_CRT_RSA) + 1))) { AD_LOG("[tls] RSA crt -0x%04x\n", -r); return; }
+-    if ((r = mbedtls_pk_parse_key(&g_pkey, (const unsigned char *)AIRDROP_KEY_RSA,
+-          strlen(AIRDROP_KEY_RSA) + 1, NULL, 0, mbedtls_ctr_drbg_random, &g_ctr_drbg))) {
++    if ((r = ad_parse_key(&g_pkey, (const unsigned char *)AIRDROP_KEY_RSA,
++          strlen(AIRDROP_KEY_RSA) + 1))) {
+           AD_LOG("[tls] RSA key -0x%04x\n", -r); return; }
+   }
+   if ((r = mbedtls_ssl_config_defaults(&g_tlsconf, MBEDTLS_SSL_IS_SERVER,
+         MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT))) {
+         AD_LOG("[tls] defaults -0x%04x\n", -r); return; }
+   mbedtls_ssl_conf_authmode(&g_tlsconf, MBEDTLS_SSL_VERIFY_NONE);   // Everyone: no client cert
++#if MBEDTLS_VERSION_MAJOR < 4
+   mbedtls_ssl_conf_rng(&g_tlsconf, mbedtls_ctr_drbg_random, &g_ctr_drbg);
++#endif
+   mbedtls_ssl_conf_min_tls_version(&g_tlsconf, MBEDTLS_SSL_VERSION_TLS1_2);
+   // Read timeout applies only to the HTTP phase (which uses the recv_timeout bio);
+   // the TLS handshake runs non-blocking via select() and ignores this.
+@@ -794,7 +820,7 @@ static void airdrop_tls_init() {
+   if ((r = mbedtls_ssl_setup(&g_ssl, &g_tlsconf))) {
+         AD_LOG("[tls] ssl_setup -0x%04x\n", -r); return; }
+   g_tls_ready = true;
+-  g_tls_alg = mbedtls_pk_get_name(&g_pkey);
++  g_tls_alg = ec_ok ? "EC" : "RSA";
+   AD_LOG("[tls] server config ready (%s, verify=none, select-loop)\n", g_tls_alg);
+ }
+ 
+@@ -1592,13 +1618,16 @@ uint32_t ad_listen_stack_min_free(void) {
+   return (g_ls_stack_min == 0xffffffffu) ? 0 : g_ls_stack_min;
+ }
+ 
++static std::atomic<bool> g_listener_stop{false};
++static std::atomic<bool> g_listener_running{false};
++
+ static void tcp_listen_task(void *) {
+   airdrop_tls_init();
+   int ls = -1;
+   int conn[MAXC]; uint32_t born[MAXC];
+   for (int i = 0; i < MAXC; i++) conn[i] = -1;
+   int active = -1; uint32_t t_data = 0, t_hs0 = 0;
+-  for (;;) {
++  while (!g_listener_stop) {
+ #ifdef AD_DIAG_DETAIL
+     { uint32_t hw = (uint32_t)uxTaskGetStackHighWaterMark(nullptr);
+       if (hw < g_ls_stack_min) g_ls_stack_min = hw; }
+@@ -1609,13 +1638,17 @@ static void tcp_listen_task(void *) {
+       if (ls < 0) { vTaskDelay(pdMS_TO_TICKS(500)); continue; }
+       int one = 1; setsockopt(ls, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+       struct sockaddr_in6 a; memset(&a, 0, sizeof(a));
+-      a.sin6_family = AF_INET6; a.sin6_port = htons(AIRDROP_PORT);   // in6addr_any
++      a.sin6_family = AF_INET6; a.sin6_port = htons(AIRDROP_PORT);
++      // Bind only AWDL's link-local address, including its interface scope.
++      // The concurrent build must not expose this listener on the STA netif.
++      memcpy(&a.sin6_addr, g_id.ll, sizeof(g_id.ll));
++      a.sin6_scope_id = awdl_netif_index();
+       if (bind(ls, (struct sockaddr *)&a, sizeof(a)) != 0 || listen(ls, 8) != 0) {
+         close(ls); ls = -1; g_listen_fd = -1; vTaskDelay(pdMS_TO_TICKS(1000)); continue;
+       }
+       set_nonblock(ls, true);
+       g_listen_fd = ls;            // published for sv_peer_waiting(), which ends the /Ask drain
+-      AD_LOG("[tcp] TLS listening (select loop) on [::]:%d\n", AIRDROP_PORT);
++      AD_LOG("[tcp] TLS listening (select loop) on [awdl0]:%d\n", AIRDROP_PORT);
+     }
+ 
+     fd_set rf; FD_ZERO(&rf); FD_SET(ls, &rf); int mx = ls;
+@@ -1744,6 +1777,13 @@ static void tcp_listen_task(void *) {
+       mbedtls_ssl_session_reset(&g_ssl);
+     }
+   }
++  // Close sockets on their owning task before the bridge removes awdl0.
++  for (int i = 0; i < MAXC; i++) if (conn[i] >= 0) close(conn[i]);
++  if (ls >= 0) close(ls);
++  g_listen_fd = -1;
++  g_net.fd = -1;
++  g_listener_running = false;
++  vTaskDelete(nullptr);
+ }
+ 
+ /* ==========================================================================
+@@ -1837,6 +1877,7 @@ int ad_begin(const char *name, uint32_t max_receive) {
+      TLS client context for its whole life, and neither leaves room for the other beside
+      AWDL. Recording which one claimed the device lets the second attempt be refused
+      instead of half-working in a way nothing reports. */
++  if (g_ad_role_receiver) return -3;
+   g_ad_role_receiver = true;
+ 
+   /* 0 means the library's own default, RX_MAX_AUTO (6 MiB); PSRAM can only lower what is
+@@ -1862,8 +1903,26 @@ int ad_begin(const char *name, uint32_t max_receive) {
+      the reasons set out in the note above ad_respond(). The hook itself stays available. */
+   /* 32 KB: mbedTLS handshake state is on this stack, and CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC
+    * means it cannot be moved to PSRAM. Priority 2 round-robins with the AWDL cadence. */
+-  return xTaskCreatePinnedToCore(tcp_listen_task, "tcp_listen", 32768, nullptr, 2,
+-                                 nullptr, 1) == pdPASS ? 0 : -1;
++  g_listener_stop = false;
++  g_listener_running = true;
++  if (xTaskCreatePinnedToCore(tcp_listen_task, "tcp_listen", 32768, nullptr, 2,
++                             nullptr, 1) != pdPASS) {
++    g_listener_running = false;
++    return -1;
++  }
++  return 0;
++}
++
++// Bounded cooperative shutdown. A blocking HTTP exchange may outlast this wait;
++// in that case keep AWDL and its buffers alive and let the caller retry/reboot.
++int ad_end(void) {
++  g_listener_stop = true;
++  for (int i = 0; i < 200 && g_listener_running; i++)
++    vTaskDelay(pdMS_TO_TICKS(10));
++  if (g_listener_running) return -1;
++  awdl_rx_tap_set(nullptr, nullptr);
++  // TLS contexts are retained until reboot; this firmware opens one window.
++  return 0;
+ }
+ 
+ /* --- telemetry ------------------------------------------------------------ */
+diff --git a/ESP32Drop/src/airdrop/port/ad_port_esp32.h b/ESP32Drop/src/airdrop/port/ad_port_esp32.h
+index 447a9e3..2008e6d 100644
+--- a/ESP32Drop/src/airdrop/port/ad_port_esp32.h
++++ b/ESP32Drop/src/airdrop/port/ad_port_esp32.h
+@@ -83,6 +83,9 @@ int  ad_begin(const char *name, uint32_t max_receive);
+    the AWDL layer's own task and does not depend on this being called promptly. */
+ void ad_poll(void);
+ 
++/* Local integration: stop the receiver before removing its network interface. */
++int ad_end(void);
++
+ /* True once ad_begin() has claimed this device for receiving. The sender refuses to start
+  * on a device that has, and vice versa: the two cannot share the memory. */
+ bool ad_role_is_receiver(void);
+diff --git a/ESP32Drop/src/awdl/port/awdl_port_esp32.cpp b/ESP32Drop/src/awdl/port/awdl_port_esp32.cpp
+index 16c1662..41bff35 100644
+--- a/ESP32Drop/src/awdl/port/awdl_port_esp32.cpp
++++ b/ESP32Drop/src/awdl/port/awdl_port_esp32.cpp
+@@ -29,6 +29,7 @@
+  * thing, which is why this file opens with forward declarations that look redundant and
+  * are not: without them, six calls and one function-pointer reference do not compile.
+  */
++#include "sdkconfig.h"
+ #include <Arduino.h>          /* millis(); the .ino got this via M5Unified for free */
+ #include <string.h>
+ #include <stdio.h>
+@@ -2081,6 +2082,23 @@ static esp_err_t wifi_probe_init(void) {
+   ignore_state(nvs_flash_init());
+   ignore_state(esp_netif_init());
+   ignore_state(esp_event_loop_create_default());
++#if CONFIG_AIRDROP_COEX
++  // Borrow photoframe's running STA driver; never initialise or stop it here.
++  wifi_mode_t mode;
++  wifi_ap_record_t sta;
++  if ((e = esp_wifi_get_mode(&mode)) != ESP_OK) return e;
++  if (mode != WIFI_MODE_STA) return ESP_ERR_INVALID_STATE;
++  if ((e = esp_wifi_sta_get_ap_info(&sta)) != ESP_OK) return e;
++  if (sta.primary != PROBE_CHANNEL) return ESP_ERR_INVALID_STATE;
++  if ((e = esp_wifi_set_mode(WIFI_MODE_APSTA)) != ESP_OK) return e;
++  // Keep the AP's hardware MAC: unlike exclusive mode, Wi-Fi is already live.
++  if ((e = esp_wifi_get_mac(WIFI_IF_AP, g_awdl_mac)) != ESP_OK) return e;
++  wifi_config_t ap = {};
++  strcpy((char *)ap.ap.ssid, "esp32drop-probe");
++  ap.ap.channel = PROBE_CHANNEL; ap.ap.authmode = WIFI_AUTH_OPEN;
++  ap.ap.ssid_hidden = 1; ap.ap.max_connection = 0; ap.ap.beacon_interval = 60000;
++  if ((e = esp_wifi_set_config(WIFI_IF_AP, &ap)) != ESP_OK) return e;
++#else
+   wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+   if ((e = esp_wifi_init(&cfg))                    != ESP_OK) return e;
+   if ((e = esp_wifi_set_storage(WIFI_STORAGE_RAM)) != ESP_OK) return e;
+@@ -2101,6 +2119,7 @@ static esp_err_t wifi_probe_init(void) {
+   ap.ap.ssid_hidden = 1; ap.ap.max_connection = 0; ap.ap.beacon_interval = 60000;
+   if ((e = esp_wifi_set_config(WIFI_IF_AP, &ap))   != ESP_OK) return e;
+   if ((e = esp_wifi_start())                       != ESP_OK) return e;
++#endif
+   if ((e = esp_wifi_register_80211_tx_cb(raw_tx_done_cb)) != ESP_OK) return e;
+   if ((e = esp_wifi_set_ps(WIFI_PS_NONE))          != ESP_OK) return e;
+   wifi_promiscuous_filter_t filt = {
+@@ -2109,7 +2128,9 @@ static esp_err_t wifi_probe_init(void) {
+   if ((e = esp_wifi_set_promiscuous_filter(&filt)) != ESP_OK) return e;
+   if ((e = esp_wifi_set_promiscuous_rx_cb(sniffer_cb)) != ESP_OK) return e;
+   if ((e = esp_wifi_set_promiscuous(true))         != ESP_OK) return e;
++#if !CONFIG_AIRDROP_COEX
+   if ((e = esp_wifi_set_channel(PROBE_CHANNEL, WIFI_SECOND_CHAN_NONE)) != ESP_OK) return e;
++#endif
+   return ESP_OK;
+ }
+ // Compose the public status. Everything here comes from ONE acquisition of the published
+@@ -2423,7 +2444,16 @@ esp_err_t awdl_begin(void) {
+    * on the first pass with a window open -- the escape hatch would itself be a hang. */
+   awdl_tick_init(&g_tick, nullptr);
+ 
+-  if ((e = wifi_probe_init()) != ESP_OK) return e;
++  if ((e = wifi_probe_init()) != ESP_OK) {
++#if CONFIG_AIRDROP_COEX
++    // An attach failure must not leave our callbacks or AP enabled.
++    ignore_state(esp_wifi_set_promiscuous(false));
++    ignore_state(esp_wifi_set_promiscuous_rx_cb(nullptr));
++    ignore_state(esp_wifi_register_80211_tx_cb(nullptr));
++    ignore_state(esp_wifi_set_mode(WIFI_MODE_STA));
++#endif
++    return e;
++  }
+ 
+   /* wifi_probe_init() derived the locally-administered AWDL identity and installed that
+      exact address on WIFI_IF_AP before enabling it, so the hardware can ACK frames sent
+@@ -2513,11 +2543,21 @@ esp_err_t awdl_end(void) {
+   /* 2. The radio. Promiscuous off FIRST: sniffer_cb writes into the frame ring from the
+    *    Wi-Fi task, and proc_task is already gone, so every frame after this point is work
+    *    nobody will ever collect. */
++#if CONFIG_AIRDROP_COEX
++  // Keep netif/buffers alive if the driver cannot release our hooks.
++  esp_err_t e;
++  if ((e = esp_wifi_set_promiscuous(false)) != ESP_OK) return e;
++  if ((e = esp_wifi_set_promiscuous_rx_cb(nullptr)) != ESP_OK) return e;
++  if ((e = esp_wifi_register_80211_tx_cb(nullptr)) != ESP_OK) return e;
++  // Return the borrowed driver to station mode without disconnecting it.
++  if ((e = esp_wifi_set_mode(WIFI_MODE_STA)) != ESP_OK) return e;
++#else
+   ignore_state(esp_wifi_set_promiscuous(false));
+   ignore_state(esp_wifi_set_promiscuous_rx_cb(nullptr));
+   ignore_state(esp_wifi_register_80211_tx_cb(nullptr));
+   ignore_state(esp_wifi_stop());
+   ignore_state(esp_wifi_deinit());
++#endif
+ 
+   /* 3. The netif, then its queue. NetifTxFrame is stored BY VALUE, so vQueueDelete frees
+    *    every queued frame with it -- there is nothing to drain. */

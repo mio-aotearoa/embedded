@@ -100,13 +100,12 @@ is portable and `scripts/pinyin-dict.sh` builds the 1 MB dictionary for
 `/sd/ime/dict_pinyin.dat`. The remaining work — an LVGL 8 candidate UI and CJK
 glyphs — is tracked in [`docs/cjk-rendering.md`](docs/cjk-rendering.md).
 
-**reTerminal E1002** — esp32-photoframe owns boot, storage, image pipeline and
-deep sleep. An ESP-IDF component (`components/airdrop_bridge`) compiles
-ESP32Drop's receive path unmodified behind a small `Arduino.h` shim
-(`components/esp32drop_compat`), because ESP32Drop is an Arduino library whose
-core only needs `millis()`. Because AWDL takes the 2.4 GHz radio exclusively,
-AirDrop is a boot mode that runs instead of Wi-Fi, then hands the received
-file to photoframe's own display flow.
+**reTerminal E1002** — esp32-photoframe owns storage, image processing and
+sleep. The AirDrop bridge supplies two builds: `switch` chooses exclusive
+Wi-Fi or AirDrop at boot; `coex` attempts a bounded AirDrop window alongside
+a connected channel-6 Wi-Fi station and HTTP server. ESP32Drop is built behind
+a small Arduino shim with local radio-ownership and listener-shutdown patches.
+The concurrent build needs hardware validation.
 
 See [`docs/architecture.md`](docs/architecture.md) for the details, the
 constraints behind each choice, and the known gaps.
@@ -160,8 +159,7 @@ an ordinary program (`nix run`) with a project-local `.platformio/` cache.
 
 ## Status
 
-The e-paper firmware is complete as described (bridge + two patches). The
-T-Deck firmware is wadamesh plus the Kiwix app and the ESP-AI model manager: no
+The T-Deck firmware is wadamesh plus the Kiwix app and the ESP-AI model manager: no
 MeshCore adapter or UI fork remains in this repository, only the parser, the
 picker, the downloader and the model page.
 
@@ -170,10 +168,9 @@ toolchain (PlatformIO/espressif32 6.11.0) produces
 `third_party/out/LilyGo_TDeck_companion_radio_touch.bin` (3,859,664 bytes),
 with `KiwixApp::launch`, `Esp32AiApp::launch`, `ZimArchive::searchTitles` and
 `httpDownloadStart` linked in. It has **not been flashed or run on hardware**.
-The **E1002 image has not been compiled** — that needs the ESP-IDF S3 toolchain.
-Also verified: both patch series apply/revert cleanly; the bridge's calls match
-the pinned ESP32Drop/photoframe headers; the ZIM parser and companion link pass
-their host tests. See `docs/architecture.md` for the exact list.
+**Both E1002 variants compile and link** with ESP-IDF 6.0.3 / GCC 15.3.0.
+Merged first-flash images are in `build/e1002-{switch,coex}/firmware.bin`.
+AirDrop/Wi-Fi operation has not been verified on hardware.
 
 ## Licensing
 
@@ -188,28 +185,14 @@ repository's own code is GPL-3.0 (see `LICENSE`).
 
 ## Building the reTerminal E1002 firmware
 
-`firmware/reterminal-e1002/build.py` applies the esp32-photoframe series and
-builds one image per sdkconfig fragment. It needs `idf.py` and the ESP32-S3
-toolchain, and the generated assets have to exist first: the gzipped web UI
-(`main/webapp/*.gz`) and the splash buffers (`main/splash_data/*.epdgz`).
+With ESP-IDF 6.0 activated:
 
 ```bash
-nix develop github:mirrexagon/nixpkgs-esp-dev#esp32s3-idf -c bash -c \
-  'firmware/reterminal-e1002/build.py airdrop'   # Wi-Fi first, AirDrop window after boot
-nix develop github:mirrexagon/nixpkgs-esp-dev#esp32s3-idf -c bash -c \
-  'firmware/reterminal-e1002/build.py coex'      # experimental Wi-Fi + AirDrop seam
-# outputs: build/e1002-airdrop/esp32-photoframe.bin, build/e1002-coex/esp32-photoframe.bin
+firmware/reterminal-e1002/build.sh   # builds switch and coex
 ```
 
-The splash assets come from esp32-photoframe's own `generate_splash.py` when its
-native `canvas` dependency installs. Where it cannot (this repository's CI
-image), `scripts/pack_splash.py` renders the same layout with
-rsvg-convert/Inkscape/ImageMagick and packs the same gzip-compressed 4bpp
-buffer, writing the assets and `splash_meta.h` where the firmware expects them:
-
-```bash
-python3 scripts/pack_splash.py --board seeedstudio_reterminal_e1002
-```
+See [build and flash instructions](firmware/reterminal-e1002/README.md) for
+prerequisites, mode selection, checksums and hardware limits.
 
 Host unit tests for both firmwares (ZIM parser, AirDrop companion link) need no
 ESP32 toolchain:

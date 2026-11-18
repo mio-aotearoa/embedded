@@ -1,0 +1,8 @@
+menu "AirDrop bridge"
+config AIRDROP_COEX
+    bool "Experimental same-channel Wi-Fi STA + AWDL"
+    default n
+    help
+        Attach AWDL to the existing station driver using APSTA. Requires a
+        connected 2.4 GHz station on channel 6. Radio timing is experimental.
+endmenu

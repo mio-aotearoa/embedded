@@ -1,13 +1,8 @@
 // airdrop_bridge.h -- run one AirDrop receive window on an esp32-photoframe
 // device, then hand the received image to the caller.
 //
-// ESP32Drop's AWDL link takes the 2.4 GHz radio exclusively, so this cannot run
-// beside esp32-photoframe's Wi-Fi station. It is a boot mode: run the window,
-// receive one image, tear AWDL down, then let photoframe's own image pipeline
-// put the file on the panel.
-//
-// The implementation compiles ESP32Drop's receive path unmodified
-// (awdl_port_esp32.cpp + ad_port_esp32.cpp) behind a tiny Arduino shim.
+// Default: exclusive boot-time receive window. CONFIG_AIRDROP_COEX instead
+// borrows a connected channel-6 station using a locally patched APSTA port.
 #pragma once
 
 #include <stdbool.h>
@@ -53,10 +48,13 @@ bool airdrop_bridge_boot_requested(void);
 
 // Run the receive window. On ESP_OK `out_path` holds the received JPEG or PNG
 // (inside the photoframe storage mount) and the radio has been released, so the
-// caller may start Wi-Fi. On timeout/error nothing is left running.
+// caller may start Wi-Fi. Coex preserves the already running station.
+// A failed teardown keeps is_active() true; reboot before reusing the radio.
 //
 // Blocking; call from app_main (or a task with >= 8 KB stack headroom).
 esp_err_t airdrop_bridge_receive_to_file(char *out_path, size_t out_path_cap, uint32_t timeout_ms);
+
+bool airdrop_bridge_is_active(void);
 
 // Release the radio if a window was started and not finished (error paths).
 void airdrop_bridge_abort(void);

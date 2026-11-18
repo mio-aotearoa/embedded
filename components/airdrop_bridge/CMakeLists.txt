@@ -1,4 +1,4 @@
-# AirDrop receive boot window for esp32-photoframe.
+# AirDrop receive window: exclusive boot selection or experimental APSTA.
 #
 # ESP32Drop's receive path is the AWDL port plus the AirDrop port; its codecs are
 # header-only. The sender/BLE files are intentionally not compiled (they are a
@@ -36,3 +36,6 @@ idf_component_register(
 # ESP32Drop is written for the Arduino ESP32 core but uses ESP-IDF APIs; the
 # shim supplies the Arduino names its ports include.
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-unused-parameter -Wno-error=comment)
+
+# ESP32Drop uses pre-C++20 volatile counters; keep its original language level.
+target_compile_options(${COMPONENT_LIB} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-std=gnu++17>")

@@ -1,11 +1,12 @@
 // ESP32Drop receive window for esp32-photoframe.
 //
-// Nothing in ESP32Drop is modified. Its two ESP32 port translation units are
-// compiled into this component (see CMakeLists.txt), its headers are included
-// as published, and the only concession is components/esp32drop_compat's
+// The optional coex build patches ESP32Drop radio ownership. Its port files are
+// compiled into this component (see CMakeLists.txt), with the local lifecycle
+// patch series applied and components/esp32drop_compat's
 // Arduino.h, which supplies millis()/delay()/Serial.
 #include "airdrop_bridge.h"
 
+#include <atomic>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -19,6 +20,8 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_timer.h"
+#include "esp_wifi.h"
+#include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
@@ -28,7 +31,9 @@ static const char *TAG = "airdrop";
 // photoframe's image directory; see main/config.h (IMAGE_DIRECTORY).
 #define AIRDROP_OUTPUT_DIR "/storage/images"
 
-static bool s_started;
+static std::atomic<bool> s_started{false};
+
+bool airdrop_bridge_is_active(void) { return s_started; }
 static volatile bool s_ready;
 static char s_path[160];
 static uint32_t s_bytes;
@@ -154,6 +159,10 @@ void airdrop_bridge_abort(void)
     // awdl_end() may refuse while a peer is still being acknowledged. Keeping
     // s_started true in that case is deliberate: the next attempt (or a real
     // reboot) still needs to know the radio is ours.
+    if (ad_end() != 0) {
+        ESP_LOGW(TAG, "AirDrop listener still busy; preserving AWDL until reboot");
+        return;
+    }
     esp_err_t err = awdl_end();
     if (err == ESP_OK) {
         s_started = false;
@@ -169,6 +178,9 @@ esp_err_t airdrop_bridge_receive_to_file(char *out_path, size_t out_path_cap, ui
         return ESP_ERR_INVALID_ARG;
     }
     out_path[0] = '\0';
+    if (s_started || ad_role_is_receiver()) {
+        return ESP_ERR_INVALID_STATE;
+    }
     s_ready = false;
     s_path[0] = '\0';
 
@@ -178,13 +190,12 @@ esp_err_t airdrop_bridge_receive_to_file(char *out_path, size_t out_path_cap, ui
         return err;
     }
 
+    s_started = true;  // Failed startup can still have tasks/radio resources.
     err = awdl_begin();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "awdl_begin failed: %s", esp_err_to_name(err));
         return err;
     }
-    s_started = true;
-
     ad_on_file(airdrop_on_file, NULL);
     int rc = ad_begin(AIRDROP_BRIDGE_NAME, AIRDROP_BRIDGE_MAX_RECEIVE_BYTES);
     if (rc != 0) {
@@ -196,11 +207,20 @@ esp_err_t airdrop_bridge_receive_to_file(char *out_path, size_t out_path_cap, ui
     ESP_LOGI(TAG, "listening as \"%s\" for %u s", AIRDROP_BRIDGE_NAME,
              (unsigned)(timeout_ms / 1000));
 
-    const TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(timeout_ms);
+    const TickType_t started_at = xTaskGetTickCount();
     uint32_t last_logged_bytes = 0;
-    while (!s_ready && xTaskGetTickCount() < deadline) {
+    while (!s_ready && (TickType_t)(xTaskGetTickCount() - started_at) < pdMS_TO_TICKS(timeout_ms)) {
         // The only call ESP32Drop requires to be pumped; callbacks run on this
         // task, which is why writing the file above is legal.
+#if CONFIG_AIRDROP_COEX
+        wifi_ap_record_t sta;
+        if (esp_wifi_sta_get_ap_info(&sta) != ESP_OK || sta.primary != 6) {
+            ESP_LOGW(TAG, "station lost channel 6; ending AWDL window");
+            break;
+        }
+        // Photoframe's power manager also updates this setting periodically.
+        esp_wifi_set_ps(WIFI_PS_NONE);
+#endif
         ad_poll();
         airdrop_log_diagnostics();
 
@@ -222,8 +242,8 @@ esp_err_t airdrop_bridge_receive_to_file(char *out_path, size_t out_path_cap, ui
     // Let the archive finish so the sender is told the transfer succeeded
     // instead of watching its progress bar die at the last block. Bounded, and
     // only while a transfer is actually in flight.
-    const TickType_t grace = xTaskGetTickCount() + pdMS_TO_TICKS(3000);
-    while (xTaskGetTickCount() < grace) {
+    const TickType_t grace = xTaskGetTickCount();
+    while ((TickType_t)(xTaskGetTickCount() - grace) < pdMS_TO_TICKS(3000)) {
         struct AdStatus st;
         ad_stats_read(&st);
         if (!st.rx_active) {
