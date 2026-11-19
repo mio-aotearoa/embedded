@@ -20,6 +20,7 @@ class LocalSendApp
     void rebuild(void);
     void sendFile(const char *name);
     void setStatus(const char *msg);
+    void notify(const char *msg, int ms = 2400);
 
     static void rowCb(lv_event_t *e);
     static void tickCb(lv_timer_t *t);

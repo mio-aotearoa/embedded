@@ -19,13 +19,16 @@ namespace
 {
 HttpDownloadState s_state;
 TaskHandle_t s_task = nullptr;
+StaticTask_t *s_tcb = nullptr;
+StackType_t *s_stack = nullptr;
+uint32_t s_stackBytes = 0;
 volatile bool s_cancel = false;
 
 // Hugging Face 302s to a signed CDN URL that is ~1.1 KB; 320 B truncated it and
 // the next hop then failed as HTTP -1 ("connection refused").
 char s_url[1536];
-char s_dest[144];
-char s_tmp[160];
+char s_dest[192];
+char s_tmp[208];
 uint64_t s_expected = 0;
 
 void setError(const char *msg)
@@ -38,7 +41,6 @@ void finish(bool ok)
     s_state.ok = ok;
     s_state.running = false;
     s_state.done = true;
-    s_task = nullptr;
 }
 
 // Arduino-ESP32 ships a prebuilt mbedtls that always allocates the full TLS
@@ -60,12 +62,6 @@ void tlsPsramFree(void *p)
     heap_caps_free(p);
 }
 
-void leaveTask(bool ok)
-{
-    finish(ok);
-    vTaskDelete(nullptr);
-}
-
 void removePartial()
 {
     if (s_tmp[0])
@@ -74,14 +70,12 @@ void removePartial()
     }
 }
 
-void downloadTask(void *)
+void runOneDownload(void)
 {
-    mbedtls_platform_set_calloc_free(tlsPsramCalloc, tlsPsramFree);
-
     if (WiFi.status() != WL_CONNECTED)
     {
         setError("Wi-Fi is not connected");
-        leaveTask(false);
+        finish(false);
         return;
     }
 
@@ -126,7 +120,7 @@ void downloadTask(void *)
             if (!tls)
             {
                 setError("out of memory for TLS");
-                leaveTask(false);
+                finish(false);
                 return;
             }
             tls->setInsecure();  // no cert store on the device; see docs/architecture.md
@@ -161,7 +155,7 @@ void downloadTask(void *)
             if (!plain)
             {
                 setError("out of memory for TCP");
-                leaveTask(false);
+                finish(false);
                 return;
             }
             began = http.begin(*plain, current);
@@ -171,7 +165,7 @@ void downloadTask(void *)
             setError("cannot parse the URL");
             delete tls;
             delete plain;
-            leaveTask(false);
+            finish(false);
             return;
         }
 
@@ -193,13 +187,13 @@ void downloadTask(void *)
             if (!loc.length() || hop >= 4)
             {
                 setError(loc.length() ? "too many redirects" : "redirect without a Location");
-                leaveTask(false);
+                finish(false);
                 return;
             }
             if (loc.length() >= sizeof current)
             {
                 setError("redirect URL too long");
-                leaveTask(false);
+                finish(false);
                 return;
             }
             if (loc.startsWith("http"))
@@ -226,7 +220,7 @@ void downloadTask(void *)
             http.end();
             delete tls;
             delete plain;
-            leaveTask(false);
+            finish(false);
             return;
         }
         length = http.getSize();
@@ -263,7 +257,7 @@ void downloadTask(void *)
         http.end();
         delete tls;
         delete plain;
-        leaveTask(false);
+        finish(false);
         return;
     }
     meshcomodMarkSdIo();
@@ -328,7 +322,7 @@ void downloadTask(void *)
     {
         removePartial();
         s_state.bytes = 0;
-        leaveTask(false);
+        finish(false);
         return;
     }
 
@@ -338,28 +332,102 @@ void downloadTask(void *)
     {
         setError("cannot rename the finished download");
         removePartial();
-        leaveTask(false);
+        finish(false);
         return;
     }
     meshcomodMarkSdIo();
-    leaveTask(true);
+    finish(true);
+}
+
+// Long-lived worker (same pattern as the Kiwix catalogue): reserve the stack
+// once with xTaskCreateStatic. A fresh xTaskCreate(24 KB) fails once LVGL has
+// fragmented internal heap — that was "Cannot start the download" after browsing
+// the catalogue.
+void downloadTask(void *)
+{
+    mbedtls_platform_set_calloc_free(tlsPsramCalloc, tlsPsramFree);
+    for (;;)
+    {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        runOneDownload();
+    }
+}
+
+bool spawnDownloadTask(void)
+{
+    if (s_task) return true;
+
+    if (!s_tcb)
+    {
+        s_tcb = (StaticTask_t *)heap_caps_malloc(sizeof(StaticTask_t),
+                                                 MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    }
+    if (!s_stack)
+    {
+        // Prefer internal RAM (TLS handshakes are happier there). Ladder down if
+        // the UI already ate the big contiguous blocks.
+        static const uint32_t kSizes[] = {20 * 1024, 16 * 1024, 12 * 1024, 10 * 1024};
+        for (uint32_t sz : kSizes)
+        {
+            s_stack = (StackType_t *)heap_caps_malloc(sz, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+            if (s_stack)
+            {
+                s_stackBytes = sz;
+                break;
+            }
+        }
+        if (!s_stack)
+        {
+            for (uint32_t sz : kSizes)
+            {
+                s_stack = (StackType_t *)heap_caps_malloc(sz, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                if (s_stack)
+                {
+                    s_stackBytes = sz;
+                    break;
+                }
+            }
+        }
+    }
+    if (!s_tcb || !s_stack) return false;
+
+    // Pin to core 0 with Wi-Fi/LwIP: TLS from the other core often returns HTTP -1.
+    s_task = xTaskCreateStaticPinnedToCore(downloadTask, "httpdl",
+                                           s_stackBytes / sizeof(StackType_t), nullptr, 4,
+                                           s_stack, s_tcb, 0);
+    if (!s_task) return false;
+    Serial.printf("[httpdl] stack %u B (free_int=%u max=%u psram=%u)\n",
+                  (unsigned)s_stackBytes, (unsigned)ESP.getFreeHeap(),
+                  (unsigned)ESP.getMaxAllocHeap(),
+                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    return true;
 }
 }  // namespace
+
+bool httpDownloadWarmup(void) { return spawnDownloadTask(); }
 
 bool httpDownloadStart(const char *url, const char *destPath, uint64_t expectedSize)
 {
     if (s_state.running || !url || !destPath)
     {
+        setError(s_state.running ? "A download is already running" : "bad download arguments");
         return false;
     }
     const bool http = strncmp(url, "http://", 7) == 0;
     const bool https = strncmp(url, "https://", 8) == 0;
     if (!http && !https)
     {
+        setError("URL must start with http:// or https://");
         return false;
     }
-    if (strlen(url) >= sizeof s_url || strlen(destPath) >= sizeof s_dest)
+    if (strlen(url) >= sizeof s_url)
     {
+        setError("URL is too long");
+        return false;
+    }
+    if (strlen(destPath) >= sizeof s_dest || strlen(destPath) + 5 >= sizeof s_tmp)
+    {
+        setError("destination path is too long");
         return false;
     }
 
@@ -378,16 +446,14 @@ bool httpDownloadStart(const char *url, const char *destPath, uint64_t expectedS
     s_state.err[0] = '\0';
     snprintf(s_state.path, sizeof s_state.path, "%s", destPath);
 
-    // 24 KB stack; pin to core 0 with the Wi-Fi/LwIP stack. A TLS handshake
-    // started from the other core often returns HTTP -1 ("connection refused")
-    // on the first hop to huggingface.co before any redirect runs.
-    if (xTaskCreatePinnedToCore(downloadTask, "httpdl", 24576, nullptr, 4, &s_task, 0) !=
-        pdPASS)
+    if (!spawnDownloadTask())
     {
         s_state.running = false;
-        s_task = nullptr;
+        setError("out of memory for download task");
         return false;
     }
+
+    xTaskNotifyGive(s_task);
     return true;
 }
 

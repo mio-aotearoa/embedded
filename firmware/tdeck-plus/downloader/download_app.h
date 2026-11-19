@@ -19,6 +19,7 @@ class DownloadApp
     void close(void);
     void startUrl(const char *url, const char *dir, const char *fixedName);
     void setStatus(const char *msg);
+    void notify(const char *msg, int ms = 2400);
     void setBusyUi(bool busy);
 
     static void rowCb(lv_event_t *e);

@@ -5,6 +5,7 @@
 #include "esp32ai_app.h"
 
 #include "AppPage.h"
+#include "app_toast.h"
 #include "cpu_boost.h"
 #include "http_download.h"
 #include "i18n.h"
@@ -134,6 +135,7 @@ bool Esp32AiApp::open(void)
     lv_obj_set_pos(status_, 4, h - 40);
 
     refresh();
+    (void)httpDownloadWarmup();
     return true;
 }
 
@@ -182,6 +184,12 @@ void Esp32AiApp::close(void)
 void Esp32AiApp::setStatus(const char *msg)
 {
     if (status_) lv_label_set_text(status_, msg ? msg : "");
+}
+
+void Esp32AiApp::notify(const char *msg, int ms)
+{
+    setStatus(msg);
+    appToast(msg, ms);
 }
 
 void Esp32AiApp::ensureChatPane(void)
@@ -373,7 +381,7 @@ void Esp32AiApp::showChat(void)
         }
         if (!genTcb_ || !genStack_)
         {
-            setStatus(TR("No RAM for generation task"));
+            notify(TR("No RAM for generation task"));
             return;
         }
         genHandle_ = xTaskCreateStaticPinnedToCore(
@@ -381,7 +389,7 @@ void Esp32AiApp::showChat(void)
             genTcb_, 0);
         if (!genHandle_)
         {
-            setStatus(TR("Cannot start generation task"));
+            notify(TR("Cannot start generation task"));
             return;
         }
         Serial.printf("[esp32ai] gen task stack %u B (free_int=%u max=%u)\n",
@@ -392,7 +400,7 @@ void Esp32AiApp::showChat(void)
     char err[96];
     if (!esp32aiEnsureLoaded(err, sizeof err))
     {
-        setStatus(err[0] ? err : TR("Failed to load the model"));
+        notify(err[0] ? err : TR("Failed to load the model"));
     }
 }
 
@@ -414,7 +422,7 @@ void Esp32AiApp::rowCb(lv_event_t *e)
     sdPath(path, sizeof path, kFiles[idx].name);
     if (fileSize(path, have) && have == kFiles[idx].bytes)
     {
-        s_active->setStatus(TR("Already on the card"));
+        s_active->notify(TR("Already on the card"), 1600);
         return;
     }
     s_active->beginDownload(idx);
@@ -425,22 +433,23 @@ void Esp32AiApp::beginDownload(int fileIndex)
     if (fileIndex < 0 || fileIndex >= kFileCount) return;
     if (httpDownloadBusy())
     {
-        setStatus(TR("A download is already running"));
+        notify(TR("A download is already running"));
         return;
     }
     if (WiFi.status() != WL_CONNECTED)
     {
-        setStatus(TR("Connect to Wi-Fi first"));
+        notify(TR("Connect to Wi-Fi first"));
         return;
     }
     SD.mkdir("/esp32ai");
     SD.mkdir(kDir);
 
-    char path[128];
+    char path[192];
     sdPath(path, sizeof path, kFiles[fileIndex].name);
     if (!httpDownloadStart(kFiles[fileIndex].url, path, kFiles[fileIndex].bytes))
     {
-        setStatus(TR("Cannot start the download"));
+        const HttpDownloadState &st = httpDownloadState();
+        notify(st.err[0] ? st.err : TR("Cannot start the download"));
         return;
     }
 
@@ -449,7 +458,7 @@ void Esp32AiApp::beginDownload(int fileIndex)
 
     char msg[96];
     snprintf(msg, sizeof msg, TR("Downloading %s\xE2\x80\xA6"), kFiles[fileIndex].name);
-    setStatus(msg);
+    notify(msg, 1600);
 }
 
 void Esp32AiApp::taCb(lv_event_t *e)
@@ -606,11 +615,11 @@ void Esp32AiApp::tickCb(lv_timer_t *t)
         {
             char msg[128];
             snprintf(msg, sizeof msg, TR("Saved %s to the card"), name);
-            app->setStatus(msg);
+            app->notify(msg);
         }
     }
     else
     {
-        app->setStatus(err[0] ? err : TR("Download failed"));
+        app->notify(err[0] ? err : TR("Download failed"), 3200);
     }
 }

@@ -36,6 +36,7 @@ class KiwixApp
     bool openArchive(const char *path);
     void openArticle(const ZimEntry &entry);
     void setStatus(const char *msg);
+    void notify(const char *msg, int ms = 2400);  // status line + system toast
     void startDownload(const char *url);
     void showCatalogue(const char *dir);
     static void requestCatalogue(const char *dir);

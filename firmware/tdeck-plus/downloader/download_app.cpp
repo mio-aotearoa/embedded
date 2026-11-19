@@ -7,6 +7,7 @@
 #include "download_app.h"
 
 #include "AppPage.h"
+#include "app_toast.h"
 #include "http_download.h"
 #include "i18n.h"
 #include "url_util.h"   // bare host -> https://
@@ -166,6 +167,7 @@ bool DownloadApp::open(void)
     }
 
     timer_ = lv_timer_create(tickCb, 400, nullptr);
+    (void)httpDownloadWarmup();
     return true;
 }
 
@@ -193,6 +195,12 @@ void DownloadApp::setStatus(const char *msg)
     if (status_) lv_label_set_text(status_, msg ? msg : "");
 }
 
+void DownloadApp::notify(const char *msg, int ms)
+{
+    setStatus(msg);
+    appToast(msg, ms);
+}
+
 void DownloadApp::setBusyUi(bool busy)
 {
     if (getBtn_)
@@ -211,17 +219,17 @@ void DownloadApp::startUrl(const char *url, const char *dir, const char *fixedNa
 {
     if (!url || (strncmp(url, "http://", 7) != 0 && strncmp(url, "https://", 8) != 0))
     {
-        setStatus(TR("The URL must start with http:// or https://"));
+        notify(TR("The URL must start with http:// or https://"));
         return;
     }
     if (httpDownloadBusy())
     {
-        setStatus(TR("A download is already running"));
+        notify(TR("A download is already running"));
         return;
     }
     if (WiFi.status() != WL_CONNECTED)
     {
-        setStatus(TR("Connect to Wi-Fi first"));
+        notify(TR("Connect to Wi-Fi first"));
         return;
     }
 
@@ -232,18 +240,19 @@ void DownloadApp::startUrl(const char *url, const char *dir, const char *fixedNa
     if (fixedName && fixedName[0]) snprintf(name, sizeof name, "%s", fixedName);
     else fileNameFor(url, name, sizeof name);
 
-    char dest[128];
+    char dest[192];
     snprintf(dest, sizeof dest, "%s/%s", dir, name);
 
     if (!httpDownloadStart(url, dest, 0))
     {
-        setStatus(TR("Cannot start the download"));
+        const HttpDownloadState &st = httpDownloadState();
+        notify(st.err[0] ? st.err : TR("Cannot start the download"));
         return;
     }
     setBusyUi(true);
     char msg[128];
     snprintf(msg, sizeof msg, TR("Downloading to %s"), dest);
-    setStatus(msg);
+    notify(msg, 1600);
 }
 
 void DownloadApp::downloadCb(lv_event_t *e)
@@ -351,10 +360,10 @@ void DownloadApp::tickCb(lv_timer_t *t)
     {
         char msg[160];
         snprintf(msg, sizeof msg, TR("Saved %s"), path);
-        app->setStatus(msg);
+        app->notify(msg);
     }
     else
     {
-        app->setStatus(err[0] ? err : TR("Download failed"));
+        app->notify(err[0] ? err : TR("Download failed"), 3200);
     }
 }

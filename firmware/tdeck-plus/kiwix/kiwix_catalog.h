@@ -12,7 +12,7 @@
 
 struct KiwixCatalogItem
 {
-    char name[96];   // file or folder name, no trailing slash
+    char name[128];  // file or folder name, no trailing slash
     char size[16];   // "48M" exactly as the mirror prints it (empty for folders)
     uint64_t bytes;  // size parsed from `size`, 0 when the mirror gave none
     bool isDir;

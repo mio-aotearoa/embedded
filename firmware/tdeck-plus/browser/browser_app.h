@@ -24,6 +24,7 @@ class BrowserApp
     void close(void);
     void renderPage(void);
     void setStatus(const char *msg);
+    void notify(const char *msg, int ms = 2400);
 
     static void goCb(lv_event_t *e);
     static void taCb(lv_event_t *e);

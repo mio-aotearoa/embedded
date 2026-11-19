@@ -11,6 +11,7 @@
 #include "browser_app.h"
 
 #include "AppPage.h"
+#include "app_toast.h"
 #include "cpu_boost.h"
 #include "i18n.h"
 #include "url_util.h"   // bare host -> https://
@@ -385,6 +386,12 @@ void BrowserApp::setStatus(const char *msg)
     if (status_) lv_label_set_text(status_, msg ? msg : "");
 }
 
+void BrowserApp::notify(const char *msg, int ms)
+{
+    setStatus(msg);
+    appToast(msg, ms);
+}
+
 void BrowserApp::navigate(const char *url)
 {
     // Typing a bare host ("example.com") means https: that is what the firmware
@@ -392,23 +399,23 @@ void BrowserApp::navigate(const char *url)
     char full[256];
     if (!urlComplete(url, full, sizeof full))
     {
-        setStatus(TR("That URL is too long"));
+        notify(TR("That URL is too long"));
         return;
     }
     if (!full[0]) return;
     if (strncmp(full, "http://", 7) != 0 && strncmp(full, "https://", 8) != 0)
     {
-        setStatus(TR("Only http:// and https:// URLs are supported"));
+        notify(TR("Only http:// and https:// URLs are supported"));
         return;
     }
     if (s_fetch.running)
     {
-        setStatus(TR("A page is already loading"));
+        notify(TR("A page is already loading"), 1600);
         return;
     }
     if (WiFi.status() != WL_CONNECTED)
     {
-        setStatus(TR("Connect to Wi-Fi first"));
+        notify(TR("Connect to Wi-Fi first"));
         return;
     }
 
@@ -427,7 +434,7 @@ void BrowserApp::navigate(const char *url)
     if (xTaskCreatePinnedToCore(fetchTask, "browser-fetch", 8192, nullptr, 1, nullptr, 0) != pdPASS)
     {
         s_fetch.running = false;
-        setStatus(TR("Cannot start the fetch"));
+        notify(TR("Cannot start the fetch"));
     }
 }
 
@@ -654,7 +661,7 @@ void BrowserApp::tickCb(lv_timer_t *)
     if (s_fetch.done && !s_fetch.ok)
     {
         s_fetch.done = false;
-        app->setStatus(s_fetch.err[0] ? s_fetch.err : TR("The page could not be loaded"));
+        app->notify(s_fetch.err[0] ? s_fetch.err : TR("The page could not be loaded"), 3200);
     }
 }
 

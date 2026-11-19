@@ -26,6 +26,7 @@ class Esp32AiApp
     void showChat(void);
     void beginDownload(int fileIndex);
     void setStatus(const char *msg);
+    void notify(const char *msg, int ms = 2400);
     void ensureChatPane(void);
     lv_obj_t *addChatMessage(const char *who, const char *text, bool streaming);
     void refreshAssistantRow(void);

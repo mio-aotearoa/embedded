@@ -11,6 +11,7 @@
 #include "kiwix_app.h"
 
 #include "AppPage.h"     // wadamesh app-page chrome: root, "< title" bar, async teardown
+#include "app_toast.h"
 #include "http_download.h"  // Wi-Fi -> SD downloader shared with the ESP-AI page
 #include "i18n.h"        // TR()
 #include "ime_ja.h"     // romaji -> kana in wadamesh's typing path
@@ -20,6 +21,7 @@
 
 #include <Arduino.h>  // SD is pulled in from here on this core
 #include <SD.h>
+#include <WiFi.h>
 #include <ctype.h>
 #include <esp_heap_caps.h>
 #include <lvgl.h>
@@ -351,9 +353,11 @@ bool KiwixApp::open(void)
 
     showArchives();
     appPageBindTextField(nullptr);      // the archive list needs no typing
-    // Reserve the catalogue worker stack now, before list/widgets fragment the
-    // last contiguous internal block (otherwise Catalogue reports OOM).
+    // Reserve the catalogue + download worker stacks now, before list/widgets
+    // fragment the last contiguous internal blocks (otherwise Catalogue / Start
+    // download report OOM).
     (void)kiwixCatalogWarmup();
+    (void)httpDownloadWarmup();
     return true;
 }
 
@@ -395,7 +399,16 @@ void KiwixApp::close(void)
     }
 }
 
-void KiwixApp::setStatus(const char* msg) { if (status_) lv_label_set_text(status_, msg ? msg : ""); }
+void KiwixApp::setStatus(const char* msg)
+{
+    if (status_) lv_label_set_text(status_, msg ? msg : "");
+}
+
+void KiwixApp::notify(const char* msg, int ms)
+{
+    setStatus(msg);
+    appToast(msg, ms);
+}
 
 void KiwixApp::showArchives(void)
 {
@@ -619,7 +632,7 @@ void KiwixApp::showCatalogue(const char* dir)
     if (!kiwixCatalogStart(catDir_.c_str()))
     {
         const KiwixCatalogState& st = kiwixCatalogState();
-        setStatus(st.err[0] ? st.err : TR("Could not start the catalogue"));
+        notify(st.err[0] ? st.err : TR("Could not start the catalogue"));
         return;
     }
 
@@ -653,7 +666,7 @@ void KiwixApp::catalogTickCb(lv_timer_t* t)
 
     if (!ok)
     {
-        app->setStatus(err);
+        app->notify(err);
         lv_obj_t* back = lv_list_add_btn(app->list_, LV_SYMBOL_LEFT, TR("Back to archives"));
         if (back)
         {
@@ -752,8 +765,10 @@ void KiwixApp::catalogItemCb(lv_event_t* e)
         return;
     }
 
-    char url[320];
-    snprintf(url, sizeof url, "https://download.kiwix.org/zim/%s%s%s",
+    // Same FAU mirror the catalogue listed — avoids download.kiwix.org → CDN
+    // redirect hops that often fail as HTTP -1 on this board.
+    char url[384];
+    snprintf(url, sizeof url, "https://ftp.fau.de/kiwix/zim/%s%s%s",
              s_active->catDir_.empty() ? "" : s_active->catDir_.c_str(),
              s_active->catDir_.empty() ? "" : "/", it.name);
     s_active->startDownload(url);
@@ -806,24 +821,30 @@ void KiwixApp::startDownload(const char* url)
     const std::string name = zimNameFromUrl(url);
     if (name.empty())
     {
-        setStatus(TR("Enter a full .zim URL"));
+        notify(TR("Enter a full .zim URL"));
+        return;
+    }
+    if (WiFi.status() != WL_CONNECTED)
+    {
+        notify(TR("Connect to Wi-Fi first"));
         return;
     }
     if (httpDownloadBusy())
     {
-        setStatus(TR("A download is already running"));
+        notify(TR("A download is already running"));
         return;
     }
     SD.mkdir(kDownloadDir);
-    char dest[160];
+    char dest[192];
     snprintf(dest, sizeof dest, "%s/%s", kDownloadDir, name.c_str());
     if (!httpDownloadStart(url, dest, 0))
     {
-        setStatus(TR("Cannot start the download"));
+        const HttpDownloadState& st = httpDownloadState();
+        notify(st.err[0] ? st.err : TR("Cannot start the download"));
         return;
     }
     if (!dlTimer_) dlTimer_ = lv_timer_create(downloadTickCb, 400, nullptr);
-    setStatus(TR("Starting the download\xE2\x80\xA6"));
+    notify(TR("Starting the download\xE2\x80\xA6"), 1600);
 }
 
 void KiwixApp::downloadTickCb(lv_timer_t* t)
@@ -864,5 +885,6 @@ void KiwixApp::downloadTickCb(lv_timer_t* t)
         app->dlTimer_ = nullptr;
     }
     app->showArchives();
-    app->setStatus(ok ? TR("Saved to the card") : (err[0] ? err : TR("Download failed")));
+    app->notify(ok ? TR("Saved to the card") : (err[0] ? err : TR("Download failed")),
+                ok ? 2200 : 3200);
 }

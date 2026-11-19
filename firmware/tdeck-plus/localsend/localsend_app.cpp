@@ -6,6 +6,7 @@
 #include "localsend_app.h"
 
 #include "AppPage.h"
+#include "app_toast.h"
 #include "i18n.h"
 #include "localsend_client.h"
 
@@ -90,7 +91,7 @@ bool LocalSendApp::open(void)
     }
     else
     {
-        setStatus(TR("Connect to Wi-Fi first"));
+        notify(TR("Connect to Wi-Fi first"));
     }
 
     timer_ = lv_timer_create(tickCb, 500, nullptr);
@@ -191,6 +192,12 @@ void LocalSendApp::setStatus(const char *msg)
     if (status_) lv_label_set_text(status_, msg ? msg : "");
 }
 
+void LocalSendApp::notify(const char *msg, int ms)
+{
+    setStatus(msg);
+    appToast(msg, ms);
+}
+
 void LocalSendApp::sendFile(const char *name)
 {
     if (!name || !name[0]) return;
@@ -199,7 +206,7 @@ void LocalSendApp::sendFile(const char *name)
 
     if (!LocalSendClient::beginSend(path, peerIndex_))
     {
-        setStatus(TR("Cannot start the transfer"));
+        notify(TR("Cannot start the transfer"));
         return;
     }
     char msg[96];
@@ -261,11 +268,11 @@ void LocalSendApp::tickCb(lv_timer_t *t)
             snprintf(msg, sizeof msg, "%s %s (%u KB) → /localsend/", TR("Received"),
                      rx.fileName[0] ? rx.fileName : "file",
                      (unsigned)(rx.total / 1024));
-            app->setStatus(msg);
+            app->notify(msg);
         }
         else
         {
-            app->setStatus(rx.err[0] ? rx.err : TR("Receive failed"));
+            app->notify(rx.err[0] ? rx.err : TR("Receive failed"), 3200);
         }
         LocalSendClient::clearRecvDone();
         return;
@@ -323,11 +330,11 @@ void LocalSendApp::tickCb(lv_timer_t *t)
     {
         char msg[96];
         snprintf(msg, sizeof msg, "%s %u KB", TR("Sent"), (unsigned)(st.total / 1024));
-        app->setStatus(msg);
+        app->notify(msg);
     }
     else
     {
-        app->setStatus(st.err[0] ? st.err : TR("Transfer failed"));
+        app->notify(st.err[0] ? st.err : TR("Transfer failed"), 3200);
     }
     LocalSendClient::clearDone();
 }
