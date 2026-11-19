@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Host API around the vendored OutRun sources (firmware/tdeck-plus/arcade3d/game).
+// Host API around third_party/esp32s3-arcade-3d (patched submodule).
 #pragma once
 
 #include <stdint.h>

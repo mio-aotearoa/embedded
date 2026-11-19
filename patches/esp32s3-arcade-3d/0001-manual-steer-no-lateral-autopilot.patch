@@ -1,8 +1,8 @@
 diff --git a/config.h b/arcade_config.h
-similarity index 98%
+similarity index 96%
 rename from config.h
 rename to arcade_config.h
-index 3b98cb1..4836965 100644
+index 3b98cb1..0a82e21 100644
 --- a/config.h
 +++ b/arcade_config.h
 @@ -4,8 +4,8 @@
@@ -16,6 +16,15 @@ index 3b98cb1..4836965 100644
  
  // ═══════════════════════════════════════════════════════════════
  //  HARDWARE PINS (Screen pins go in User_Setup.h)
+@@ -45,7 +45,7 @@
+ // ═══════════════════════════════════════════════════════════════
+ #define SPEED_MULTIPLIER   65.0f   // maxSpeed = SEG_LEN * SPEED_MULTIPLIER (~246 km/h)
+ #define ACCEL_TARGET       0.9f    // targetAccel = maxSpeed * ACCEL_TARGET
+-#define ACCEL_RAMP         180.0f  // How fast acceleration ramps up (u/s²)
++#define ACCEL_RAMP         2500.0f // How fast auto-throttle ramps (u/s²); was 180 and felt stalled on hills
+ #define ACCEL_NEAR_MAX     0.90f   // Speed threshold to reduce acceleration
+ #define ACCEL_DAMPING      0.97f   // Multiplier when approaching maxSpeed
+ #define FRICTION           0.996f  // Friction per frame (braking ~3.3s from max)
 @@ -73,4 +73,4 @@
  // ═══════════════════════════════════════════════════════════════
  #define MAX_CARS 6
@@ -95,7 +104,7 @@ index 0797304..6142a78 100644
  #include "Arduino.h"
  
 diff --git a/physics.cpp b/physics.cpp
-index e315962..22c70fe 100644
+index e315962..ca332b5 100644
 --- a/physics.cpp
 +++ b/physics.cpp
 @@ -6,8 +6,8 @@
@@ -159,6 +168,29 @@ index e315962..22c70fe 100644
  
    playerX = clampF(playerX, -0.8, 0.8);
  }
+@@ -99,17 +106,18 @@ void updatePhysics(float dt) {
+   float prevY = segments[prevSegIdx].y;
+   float slope = (currentY - prevY) / SEG_LEN;  // Terrain slope
+ 
+-  // Going up = slower, going down = faster
++  // Going up = slower, going down = faster. Apply to speed directly —
++  // never integrate into `acceleration` (the auto-throttle state), or a
++  // sustained uphill drives it to −∞ and pins the car at standstill.
+   float gravityEffect = -slope * GRAVITY_FACTOR;
+-  acceleration += gravityEffect * dt;
+ 
+   // === ACCELERATION WITH FRICTION ===
+   // Air and ground friction
+   float friction = FRICTION;
+   speed *= friction;
+ 
+-  // Apply acceleration to speed
+-  speed += acceleration * dt;
++  // Throttle (acceleration) + slope, then clamp
++  speed += (acceleration + gravityEffect) * dt;
+ 
+   // Limit speed
+   if (speed > maxSpeed) speed = maxSpeed;
 diff --git a/physics.h b/physics.h
 index df6e534..7e2e24b 100644
 --- a/physics.h
@@ -279,7 +311,7 @@ index a3ba9b3..1926fb9 100644
  
  // Include rendering submodules
 diff --git a/track.cpp b/track.cpp
-index c550688..2036904 100644
+index c550688..2167858 100644
 --- a/track.cpp
 +++ b/track.cpp
 @@ -5,7 +5,7 @@
@@ -291,6 +323,15 @@ index c550688..2036904 100644
  #include "colors.h"
  #include <Arduino.h>
  
+@@ -68,6 +68,8 @@ void buildTrack() {
+   // Random track: combines straights, curves, and hills/dips
+   int pendingReturnDir = 0;
+   float pendingReturnMag = 0.0f;
++  // Flat run-up so auto-throttle can get the car moving before the first climb.
++  addRoad(4, 8, 4, 0, 0);
+   // Reserve segments at the end for the closing leveling section
+   const int CLOSE_SEGS = 20;
+   while (segCount < TOTAL_SEGS - CLOSE_SEGS) {
 diff --git a/track.h b/track.h
 index 4a998e1..1c2c011 100644
 --- a/track.h

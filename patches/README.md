@@ -104,17 +104,20 @@ engine is patched.
   `utils.*` to `arcade_config.h` / `arcade_utils.*` (avoids clashing with other
   `config.h` on the T-Deck include path), removes the demo's lateral autopilot,
   and adds `setManualSteer()` so the host can bank left/right while throttle
-  stays automatic.
+  stays automatic. Hill gravity is applied to speed (not integrated into the
+  throttle state), auto-throttle ramps faster, and random tracks get a short
+  flat run-up so the car is not pinned at standstill on a spawn climb.
 
 ## voxel-flight
 
 Pinned submodule `third_party/voxel-flight` (`lewtheegg/voxel-flight`). The
-OLED sketch stays in the tree unused; the AppPage host is
-`firmware/tdeck-plus/voxel_flight/`.
+AppPage host is `firmware/tdeck-plus/voxel_flight/` (including a bundled
+`font5x7.h` formerly pulled from the SparkFun OLED library).
 
-* `0001-wadamesh-host-framebuffer.patch` — adds `voxel_flight_game.cpp` (and a
-  bundled `font5x7.h`) that draws into a host RGB565 framebuffer at panel size,
-  with optional hold-to-bank steering over the upstream autopilot.
+* `0001-wadamesh-host-framebuffer.patch` — renames `voxel-flight.ino` →
+  `voxel_flight_game.cpp` and swaps the OLED/DMA path for a host RGB565
+  framebuffer at panel size, with optional hold-to-bank steering over the
+  upstream autopilot.
 
 ## esp-wifi-hal
 
