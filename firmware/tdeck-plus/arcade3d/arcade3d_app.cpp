@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "arcade3d_app.h"
 
-#include "arcade_config.h"  // SCR_W / SCR_H
+#include "arcade_config.h"  // SCR_W / SCR_H (patched submodule)
 #include "arcade_host.h"
 #include "cpu_boost.h"
 #include "game_canvas.h"

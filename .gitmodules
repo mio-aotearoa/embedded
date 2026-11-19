@@ -28,3 +28,10 @@
 [submodule "third_party/FoA"]
 	path = third_party/FoA
 	url = https://github.com/esp32-open-mac/FoA.git
+[submodule "third_party/esp32s3-arcade-3d"]
+	path = third_party/esp32s3-arcade-3d
+	url = https://github.com/davidmonterocrespo24/esp32s3-arcade-3d.git
+	branch = road
+[submodule "third_party/voxel-flight"]
+	path = third_party/voxel-flight
+	url = https://github.com/lewtheegg/voxel-flight.git

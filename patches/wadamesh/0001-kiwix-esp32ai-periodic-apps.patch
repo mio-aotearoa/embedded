@@ -1,5 +1,5 @@
 diff --git a/platformio.ini b/platformio.ini
-index 03a11235..c7c65ffe 100644
+index 03a11235..2ddbbd30 100644
 --- a/platformio.ini
 +++ b/platformio.ini
 @@ -544,7 +544,13 @@ platform = platformio/espressif32@6.11.0
@@ -17,7 +17,7 @@ index 03a11235..c7c65ffe 100644
  extra_scripts = pre:scripts/build/pre_gen_baked.py, pre:scripts/inject_wifi_env.py, pre:scripts/build/fatfs_exfat.py, pre:scripts/build/patch_lvgl_anim_uaf.py, pre:scripts/build/patch_lvgl_scroll_uaf.py, pre:scripts/build/patch_lvgl_async_del.py, pre:scripts/build/patch_lvgl_arabic.py, pre:scripts/build/patch_meshcore_txt_timestamp.py, pre:scripts/build/perf_lvgl.py, merge-bin.py
  custom_lvgl_o2 = core, draw, font, misc   ; LVGL's per-frame code at -O2 (scripts/build/perf_lvgl.py); widgets and extra stay -Os
  ; custom_lvgl_iram = lv_draw_sw_blend.c, lv_draw_label.c   ; off on the T-Deck: its ~6 KB of internal RAM is worth more than ~8% of a frame (on-device updates and TLS ran out)
-@@ -686,6 +692,61 @@ build_flags =
+@@ -686,6 +692,63 @@ build_flags =
    -D CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=16384
    -D CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=4096
  
@@ -70,16 +70,18 @@ index 03a11235..c7c65ffe 100644
 +  -I ../../build/duktape
 +
 +  ; --- OutRun (esp32s3-arcade-3d) + Voxel Flight ---
++  ; Game engines live in third_party/ as submodules; firmware/ only has AppPage hosts.
 +  -D WADAMESH_ARCADE3D=1
++  -I ../../third_party/esp32s3-arcade-3d
 +  -I ../../firmware/tdeck-plus/arcade3d
-+  -I ../../firmware/tdeck-plus/arcade3d/game
 +  -D WADAMESH_VOXELFLIGHT=1
++  -I ../../third_party/voxel-flight
 +  -I ../../firmware/tdeck-plus/voxel_flight
 +
  build_src_filter =
    +<*.cpp>
    +<*.c>
-@@ -696,6 +757,48 @@ build_src_filter =
+@@ -696,6 +759,49 @@ build_src_filter =
    +<ui-touch/*.cpp>
    +<ui-touch/*.c>
    +<../variants/lilygo_tdeck/*.cpp>
@@ -91,8 +93,9 @@ index 03a11235..c7c65ffe 100644
 +  +<../../../firmware/tdeck-plus/localsend/*.cpp>
 +  +<../../../firmware/tdeck-plus/downloader/*.cpp>
 +  +<../../../firmware/tdeck-plus/browser/*.cpp>
++  +<../../../third_party/esp32s3-arcade-3d/*.cpp>
 +  +<../../../firmware/tdeck-plus/arcade3d/*.cpp>
-+  +<../../../firmware/tdeck-plus/arcade3d/game/*.cpp>
++  +<../../../third_party/voxel-flight/*.cpp>
 +  +<../../../firmware/tdeck-plus/voxel_flight/*.cpp>
 +  +<../../../third_party/TactileBrowser/tactilebrowser_core/src/*.cpp>
 +  +<../../../build/duktape/duktape.c>

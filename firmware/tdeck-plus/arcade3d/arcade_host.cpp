@@ -2,14 +2,14 @@
 #include "arcade_host.h"
 
 #include "arcade_config.h"
+#include "arcade_utils.h"
 #include "colors.h"
 #include "physics.h"
+#include "render_hud.h"
 #include "render_player.h"
 #include "render_road.h"
-#include "render_hud.h"
 #include "rendering.h"
 #include "track.h"
-#include "arcade_utils.h"
 
 #include <Arduino.h>
 

@@ -93,6 +93,29 @@ Its `dir` is `TactileBrowser`, so both apply beside the Lexbor series.
   the two `deq_row` calls in `llm_forward` without forking the rest of
   `runtime/llm.h`.
 
+## esp32s3-arcade-3d
+
+Pinned submodule `third_party/esp32s3-arcade-3d`
+(`davidmonterocrespo24/esp32s3-arcade-3d`, branch `road`). The T-Deck AppPage
+host and TFT_eSPI canvas shim stay in `firmware/tdeck-plus/arcade3d/`; only the
+engine is patched.
+
+* `0001-manual-steer-no-lateral-autopilot.patch` — renames `config.h` /
+  `utils.*` to `arcade_config.h` / `arcade_utils.*` (avoids clashing with other
+  `config.h` on the T-Deck include path), removes the demo's lateral autopilot,
+  and adds `setManualSteer()` so the host can bank left/right while throttle
+  stays automatic.
+
+## voxel-flight
+
+Pinned submodule `third_party/voxel-flight` (`lewtheegg/voxel-flight`). The
+OLED sketch stays in the tree unused; the AppPage host is
+`firmware/tdeck-plus/voxel_flight/`.
+
+* `0001-wadamesh-host-framebuffer.patch` — adds `voxel_flight_game.cpp` (and a
+  bundled `font5x7.h`) that draws into a host RGB565 framebuffer at panel size,
+  with optional hold-to-bank steering over the upstream autopilot.
+
 ## esp-wifi-hal
 
 * `0001-esp32s3-support.patch` — adds an `esp32s3` feature. The official S3 PAC

@@ -24,9 +24,17 @@ firmware/tdeck-plus/
     generated/           vocab.h + tokenizer_encoder.h (scripts/esp32ai-headers.sh)
   common/
     http_download.{h,cpp}  one HTTP(S) -> SD transfer, on its own task
+  arcade3d/             OutRun AppPage host + TFT_eSPI canvas shim (engine is a submodule)
+  voxel_flight/         Voxel Flight AppPage host (engine is a submodule)
   test/host/            host test for the parser (no ESP32 needed)
 patches/wadamesh/
   0001-kiwix-esp32ai-periodic-apps.patch  build wiring + drawer tiles + Reader bridge
+patches/esp32s3-arcade-3d/
+  0001-manual-steer-no-lateral-autopilot.patch
+patches/voxel-flight/
+  0001-wadamesh-host-framebuffer.patch
+third_party/esp32s3-arcade-3d/   davidmonterocrespo24/esp32s3-arcade-3d (submodule)
+third_party/voxel-flight/        lewtheegg/voxel-flight (submodule)
 ```
 
 ## How the pieces fit

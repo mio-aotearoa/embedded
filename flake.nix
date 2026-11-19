@@ -154,7 +154,8 @@
               fi
 
               cd "$root"
-              ./scripts/patches.sh apply wadamesh TactileBrowser TactileBrowserCore
+              ./scripts/patches.sh apply wadamesh TactileBrowser TactileBrowserCore \
+                esp32s3-arcade-3d voxel-flight
               ./scripts/duktape.sh
 
               export PLATFORMIO_CORE_DIR="''${PLATFORMIO_CORE_DIR:-$root/.platformio}"

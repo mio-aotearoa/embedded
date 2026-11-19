@@ -26,7 +26,8 @@ esac
 
 # wadamesh carries the app hooks; TactileBrowser makes Lexbor's encoding
 # tables const so the browser's HTML/CSS engine fits in flash, not DRAM.
-./scripts/patches.sh apply wadamesh TactileBrowser TactileBrowserCore
+./scripts/patches.sh apply wadamesh TactileBrowser TactileBrowserCore \
+  esp32s3-arcade-3d voxel-flight
 
 # Duktape ships raw sources only: build its amalgamation (build/duktape/).
 ./scripts/duktape.sh
