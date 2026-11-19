@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// LocalSend app page. Discovery starts when the page opens; the peer list is
-// rebuilt only when its size changes, and progress is polled from an lv_timer
+// LocalSend app page. Opens an HTTP receiver so peers can push files to the
+// card, and discovers peers for sending. Progress is polled from an lv_timer
 // so the UI task never blocks on the network or the card.
 #include "localsend_app.h"
 
@@ -22,7 +22,7 @@ namespace
 constexpr uint32_t kBg = 0x101418;
 constexpr int kMaxFiles = 24;
 
-// Row user-data: -1 = rescan, 0..15 = peer, 100 + i = file i.
+// Row user-data: -1 = rescan, -2 = back to devices, 0..15 = peer, 100 + i = file i.
 int rowTag(lv_event_t *e) { return (int)(intptr_t)lv_event_get_user_data(e); }
 }  // namespace
 
@@ -67,7 +67,6 @@ bool LocalSendApp::open(void)
     snprintf(barTitle_, sizeof barTitle_, "%s", TR("LocalSend"));
     appPageBegin(barTitle_, &LocalSendApp::dismiss);
 
-    // The tall "< LocalSend" bar overlaps the top of the root; start below it.
     const lv_coord_t bar = appPageBarCover();
 
     list_ = lv_list_create(root_);
@@ -85,8 +84,9 @@ bool LocalSendApp::open(void)
     showPeers();
     if (WiFi.status() == WL_CONNECTED)
     {
+        LocalSendClient::startReceiver();
         LocalSendClient::startScan();
-        setStatus(TR("Searching the network..."));
+        setStatus(TR("Ready to receive · searching..."));
     }
     else
     {
@@ -101,6 +101,7 @@ void LocalSendApp::close(void)
 {
     LocalSendClient::cancelScan();
     LocalSendClient::cancelSend();
+    LocalSendClient::stopReceiver();
     if (timer_)
     {
         lv_timer_del(timer_);
@@ -242,6 +243,34 @@ void LocalSendApp::tickCb(lv_timer_t *t)
     LocalSendApp *app = s_active;
     if (!app) return;
 
+    const LocalSendClient::RecvState &rx = LocalSendClient::recvState();
+    if (rx.busy)
+    {
+        char msg[128];
+        snprintf(msg, sizeof msg, "%s %s %u / %u KB", TR("Receiving"),
+                 rx.fileName[0] ? rx.fileName : "…",
+                 (unsigned)(rx.received / 1024), (unsigned)(rx.total / 1024));
+        app->setStatus(msg);
+        return;
+    }
+    if (rx.done)
+    {
+        if (rx.ok)
+        {
+            char msg[128];
+            snprintf(msg, sizeof msg, "%s %s (%u KB) → /localsend/", TR("Received"),
+                     rx.fileName[0] ? rx.fileName : "file",
+                     (unsigned)(rx.total / 1024));
+            app->setStatus(msg);
+        }
+        else
+        {
+            app->setStatus(rx.err[0] ? rx.err : TR("Receive failed"));
+        }
+        LocalSendClient::clearRecvDone();
+        return;
+    }
+
     if (!app->filesMode_)
     {
         const int n = LocalSendClient::peerCount();
@@ -253,26 +282,26 @@ void LocalSendApp::tickCb(lv_timer_t *t)
             const int done = LocalSendClient::scanProgress();
             if (done < 255)
             {
-                snprintf(msg, sizeof msg, TR("Searching... %d/254"), done);
+                snprintf(msg, sizeof msg, TR("Ready to receive · searching... %d/254"), done);
             }
             else
             {
-                snprintf(msg, sizeof msg, "%s", TR("Finishing..."));
+                snprintf(msg, sizeof msg, "%s", TR("Ready to receive · finishing..."));
             }
             app->setStatus(msg);
         }
         else if (app->lastProgress_ != 255)
         {
             app->lastProgress_ = 255;
-            char msg[96];
+            char msg[128];
             if (n > 0)
             {
-                snprintf(msg, sizeof msg, TR("%d device(s) found - tap one"), n);
+                snprintf(msg, sizeof msg, TR("Ready to receive · %d device(s) - tap to send"), n);
             }
             else
             {
                 snprintf(msg, sizeof msg, "%s",
-                         TR("No LocalSend device found. Is the app open on the other device?"));
+                         TR("Ready to receive. No send peers yet (HTTP LocalSend only)."));
             }
             app->setStatus(msg);
         }

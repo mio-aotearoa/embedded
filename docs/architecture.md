@@ -159,21 +159,26 @@ dictionary itself is still built on a host, so downloading the lists is a
 convenience (a device with only a card can hold the data), not a way to produce
 `dict_pinyin.dat` on the S3 yet.
 
-### LocalSend — a send-only client written here, no code copied
+### LocalSend — send and receive, written here, no code copied
 
 The official LocalSend app is Flutter; the other implementations are Rust, Go
 and Win32, and none targets ESP-IDF, so there is nothing to vendor and nothing
 to patch. `firmware/tdeck-plus/localsend/` is this repository's own code written
-from the protocol description (`localsend/protocol`, v2): it discovers peers
-(multicast announcement listener on 224.0.0.167:53317, then a /24 sweep of
-`GET /api/localsend/v2/info`), calls `prepare-upload`, then streams one SD file
-to `upload` and calls `cancel` on failure. JSON for those three small documents
-is built and read by hand, so no JSON library is added.
+from the protocol description (`localsend/protocol`, v2).
 
-What it deliberately does not do: receive files, speak HTTPS (a peer announcing
-`"protocol":"https"` is not listed rather than failing later), folders or
-multi-file batches. Transfer progress comes from an `lv_timer` polling the
-worker task, like the Kiwix/ESP-AI downloader, so the UI never blocks.
+While the LocalSend page is open it runs an HTTP server on `:53317`, announces
+on multicast `224.0.0.167`, and auto-accepts one inbound file to
+`/localsend/<name>` on the card (`prepare-upload` + `upload` + `cancel`). For
+sending it discovers peers (multicast listener, then a /24 sweep of
+`GET /api/localsend/v2/info`), calls `prepare-upload`, streams one SD file to
+`upload`, and calls `cancel` on failure. JSON for those small documents is built
+and read by hand, so no JSON library is added.
+
+What it deliberately does not do: speak HTTPS (a peer announcing
+`"protocol":"https"` is not listed rather than failing later; the phone app must
+allow HTTP / disable encryption), folders or multi-file batches. Transfer
+progress comes from an `lv_timer` polling the worker tasks, like the
+Kiwix/ESP-AI downloader, so the UI never blocks.
 
 ### Periodic table (`El-EnderJ/NeoCalculator`) — data from the pinned submodule
 

@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// LocalSend (protocol v2, HTTP-only) sender for the T-Deck Plus.
+// LocalSend (protocol v2, HTTP-only) for the T-Deck Plus.
 //
 // Written from the protocol description at https://github.com/localsend/protocol:
 // no upstream client code is used (the official app is Flutter, the other
 // implementations are Rust/Go/Win32), so this file is this repository's own
 // code and there is nothing to vendor.
 //
-// Scope: discover peers on the LAN, then send one file from the SD card to one
-// peer. Receiving, TLS/HTTPS peers, folders and multi-file batches are out of
-// scope and reported as such in the UI.
+// Scope: discover peers; send one SD file to one peer; receive one file onto
+// the card while the LocalSend page is open (HTTP server on :53317). TLS/HTTPS
+// peers, folders and multi-file batches are out of scope.
 #pragma once
 
 #include <stdint.h>
@@ -34,7 +34,19 @@ class LocalSendClient
         char err[64];
     };
 
-    // Discovery: listens for multicast announcements, then asks every host in
+    struct RecvState
+    {
+        bool listening;   // HTTP receiver is up
+        bool busy;        // a transfer is in progress
+        bool done;        // last transfer finished (sticky until clearRecvDone)
+        bool ok;
+        uint32_t received;
+        uint32_t total;
+        char fileName[64];
+        char err[64];
+    };
+
+    // Discovery: listens for multicast announcements, then asks each host in
     // the local /24 for /api/localsend/v2/info. Runs in its own task.
     static bool startScan(void);
     static void cancelScan(void);
@@ -48,4 +60,11 @@ class LocalSendClient
     static void cancelSend(void);
     static const State &state(void);
     static void clearDone(void);
+
+    // Receive: bind :53317, announce on multicast, accept prepare-upload/upload.
+    // Auto-accepts one file onto /localsend/<name> on the SD card.
+    static bool startReceiver(void);
+    static void stopReceiver(void);
+    static const RecvState &recvState(void);
+    static void clearRecvDone(void);
 };

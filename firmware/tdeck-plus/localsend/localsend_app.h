@@ -3,7 +3,7 @@
 
 #include <lvgl.h>
 
-// LocalSend app page: discover LAN peers, pick a file from the card, send it.
+// LocalSend app page: receive onto the card while open; discover peers and send.
 class LocalSendApp
 {
   public:

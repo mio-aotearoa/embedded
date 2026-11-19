@@ -1,5 +1,5 @@
 diff --git a/platformio.ini b/platformio.ini
-index 03a11235..6d7b75ed 100644
+index 03a11235..cab7c94a 100644
 --- a/platformio.ini
 +++ b/platformio.ini
 @@ -544,7 +544,13 @@ platform = platformio/espressif32@6.11.0
@@ -50,7 +50,7 @@ index 03a11235..6d7b75ed 100644
 +  -I ../../firmware/tdeck-plus/periodic
 +  -I ../../third_party/neocalculator/src/apps
 +
-+  ; --- LocalSend: send a file from the card to a LocalSend peer over HTTP ---
++  ; --- LocalSend: receive onto the card; send to a peer (HTTP protocol v2) ---
 +  -D WADAMESH_LOCALSEND=1
 +  -D WADAMESH_USB_ONLY_UPDATES=1
 +  -I ../../firmware/tdeck-plus/localsend
@@ -148,7 +148,7 @@ index 484c510a..b05aad5f 100644
   * Create a page root: full width, from just under the status bar to the bottom of the
   * screen, on lv_layer_top, opaque `bg_color`, non-scrollable and CLICKABLE so no press
 diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
-index f799c2e4..94d34302 100644
+index f799c2e4..e8da1119 100644
 --- a/src/ui-touch/UITask.cpp
 +++ b/src/ui-touch/UITask.cpp
 @@ -158,6 +158,24 @@ static void* wadaMp3Scratch() { return s_wada_mp3_scratch; }
@@ -165,7 +165,7 @@ index f799c2e4..94d34302 100644
 +#include "periodic_app.h"      // Apps → Periodic Table: 118 elements, LVGL-drawn grid
 +#endif
 +#if WADAMESH_LOCALSEND
-+#include "localsend_app.h"     // Apps → LocalSend: send a card file to a LAN peer
++#include "localsend_app.h"     // Apps → LocalSend: receive onto the card; send to a peer
 +#endif
 +#if WADAMESH_DOWNLOAD
 +#include "download_app.h"      // Apps → Download: any http(s) URL straight to the card
@@ -575,7 +575,7 @@ index f799c2e4..94d34302 100644
 +  { UI_ICON_LAYOUT_GRID,        "Elements",  APPACT_PERIODIC,  HUE_SYS },     // periodic table, tap for details
 +#endif
 +#if WADAMESH_LOCALSEND
-+  { UI_ICON_SHARE_2,            "LocalSend",  APPACT_LOCALSEND, HUE_SYS },     // send a card file to a LAN peer
++  { UI_ICON_SHARE_2,            "LocalSend",  APPACT_LOCALSEND, HUE_SYS },     // receive / send on the LAN (HTTP)
 +#endif
 +#if WADAMESH_DOWNLOAD
 +  { UI_ICON_LINK,               "Download",   APPACT_DOWNLOAD,  HUE_SYS },     // any http(s) URL to the card
@@ -606,7 +606,7 @@ index f799c2e4..94d34302 100644
 +    case APPACT_PERIODIC:  PeriodicApp::launch(); return;  // 118 elements, tap for details
 +#endif
 +#if WADAMESH_LOCALSEND
-+    case APPACT_LOCALSEND: LocalSendApp::launch(); return; // send a card file to a LAN peer
++    case APPACT_LOCALSEND: LocalSendApp::launch(); return; // receive onto the card; send to a peer
 +#endif
 +#if WADAMESH_DOWNLOAD
 +    case APPACT_DOWNLOAD:  DownloadApp::launch();  return; // any http(s) URL to the card
