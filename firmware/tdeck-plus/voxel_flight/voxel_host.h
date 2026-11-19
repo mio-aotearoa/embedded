@@ -9,6 +9,8 @@ bool voxelHostBegin(int w, int h);
 void voxelHostEnd(void);
 bool voxelHostTick(void);
 void voxelHostSetButton(bool pressed);
+// -1 = bank left, 0 = release to autopilot, +1 = bank right.
+void voxelHostSetSteer(int dir);
 
 uint16_t* voxelHostFramebuffer(void);
 int voxelHostWidth(void);

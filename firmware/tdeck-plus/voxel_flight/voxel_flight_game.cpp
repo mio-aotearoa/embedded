@@ -9,9 +9,16 @@
 #include <stdlib.h>
 #include "font5x7.h"
 
-// Host-injected button (trackball click / on-screen).
+// Host-injected button (trackball click / on-screen) and manual steer.
 static volatile bool s_btn = false;
+static volatile int8_t s_steer = 0;  // -1 left, 0 autopilot, +1 right
 void voxelHostSetButton(bool pressed) { s_btn = pressed; }
+void voxelHostSetSteer(int dir)
+{
+  if (dir < 0) s_steer = -1;
+  else if (dir > 0) s_steer = 1;
+  else s_steer = 0;
+}
 
 // ---------- pins and settings ----------
 // Display pins unused on the T-Deck port (framebuffer only).
@@ -1216,7 +1223,10 @@ void updateFlight() {
   }
   balloonSteer(wantTurn);                                 // a balloon flyby takes over the steering
   if (trickState != TS_IDLE) wantTurn = 0;               // fly straight for aerobatics
-  turnRate += (wantTurn - turnRate) * 0.03f;
+  // Upstream OLED build is autopilot-only (BOOT picks a plane). On the T-Deck,
+  // holding left/right overrides the wander so the player can bank.
+  if (s_steer) wantTurn = (float)s_steer * PL->maxTurn;
+  turnRate += (wantTurn - turnRate) * (s_steer ? 0.12f : 0.03f);
   turnRate = clampf(turnRate, -PL->maxTurn, PL->maxTurn);
   heading -= turnRate;                                     // positive turnRate = turning right
   bank += (clampf(turnRate * PL->bankPerTurn, -PL->maxBank, PL->maxBank) - bank) * 0.06f;
@@ -1253,8 +1263,9 @@ bool project(int32_t wx, int32_t wy, float h, float &sx, float &sy, float &zc) {
   zc = rx * camFX + ry * camFY;
   if (zc < 1.0f) return false;
   float xc = rx * camRX + ry * camRY;
-  sx = 32 + xc * KX / zc;
-  sy = HORIZON_Y + (camH - h) * KY / zc + (sx - 32) * shear;
+  const float cx = W * 0.5f;   // was hardcoded 32 for the 64×64 OLED
+  sx = cx + xc * KX / zc;
+  sy = HORIZON_Y + (camH - h) * KY / zc + (sx - cx) * shear;
   return true;
 }
 
@@ -1275,8 +1286,9 @@ static inline void skyPx(int x, int y, uint16_t c) {
 bool skyPos(float az, float elPx, float &sx, float &sy) {
   float d = wrapPi(az - camA);
   if (fabsf(d) > 1.0f) return false;
-  sx = 32 - d * KX;
-  sy = HORIZON_Y - elPx + (sx - 32) * shear;
+  const float cx = W * 0.5f;
+  sx = cx - d * KX;
+  sy = HORIZON_Y - elPx + (sx - cx) * shear;
   return true;
 }
 
@@ -2600,6 +2612,7 @@ bool voxelHostBegin(int w, int h) {
 void voxelHostEnd(void) {
   s_live = false;
   s_btn = false;
+  s_steer = 0;
   // Keep map + fb for the next open (PSRAM is plentiful; avoids re-alloc churn).
 }
 
