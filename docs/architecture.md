@@ -123,10 +123,9 @@ tree's own render tests still pass with the const tables.
 
 Lexbor also gets a PSRAM allocator through `lexbor_memory_setup()` in
 `browser_app.cpp`: its default `malloc` serves internal RAM, where a real page's
-DOM (several times its markup) does not fit, so every page used to fall back to
-the Reader's text pass. It is installed before the first Lexbor allocation,
-falls back to internal RAM only if PSRAM is exhausted, and the fonts and the
-Reader's text buffer are untouched.
+DOM (several times its markup) does not fit. It is installed before the first
+Lexbor allocation, falls back to internal RAM only if PSRAM is exhausted, and
+the fonts and the Reader's text buffer are untouched.
 
 **JavaScript.** Inline scripts run on **Duktape 2.7.0 (ES5.1)**, the engine
 TactileBrowser's own ESP32 build uses. `scripts/duktape.sh` fetches the pinned
@@ -244,9 +243,8 @@ Two properties are deliberate:
 
 ### Deliberately out of scope (today)
 
-* Images and math: the renderer decodes neither. Articles up to 512 KB get CSS
-  and box layout; larger ones fall back to the Reader's text pass, which drops
-  CSS, tables and images.
+* Images and math: neither the Reader text pass nor the Browser Lexbor path
+  decodes article images/math. Kiwix articles open in the Reader (text).
 * Full-text search: only the ZIM title index is searched (prefix match).
 * Following ZIM-internal links from an article; the picker is the navigation.
 * Multiple archives open at once, and archives above the PSRAM/parse limits.
@@ -254,18 +252,25 @@ Two properties are deliberate:
 
 ### Web browser options
 
-The T-Deck's Web page is wadamesh's Reader with our renderer merged in: the
-pinned TactileBrowser core (Lexbor) does the layout and the Reader's text pass is
-the fallback. The engines that could have replaced it — eBrowser, Agave — and
-what each would cost in flash, build integration and LVGL version are compared
-in [`web-browser-options.md`](web-browser-options.md).
+**Web** is wadamesh's upstream Reader (text extraction). **Browser** is a
+separate drawer app on the pinned TactileBrowser core (Lexbor). The engines that
+could have replaced it — eBrowser, Agave — and what each would cost in flash,
+build integration and LVGL version are compared in
+[`web-browser-options.md`](web-browser-options.md).
 
 ## Firmware 2 — reTerminal E1002
 
 The [E1002 build instructions](../firmware/reterminal-e1002/README.md) describe
-both variants and their limits. `components/airdrop_bridge` connects
-ESP32Drop's receiver to photoframe's existing display pipeline. The Arduino
-shim is in `components/esp32drop_compat`.
+three firmwares. `components/airdrop_bridge` connects ESP32Drop's receiver to
+photoframe's display pipeline for the IDF images. The Arduino shim is in
+`components/esp32drop_compat`.
+
+* **`switch`** — ESP32Drop exclusive-radio contract (AirDrop XOR Wi‑Fi).
+* **`coex`** — channel-6 2.4 GHz dual-protocol RX experiment on Espressif's
+  closed MAC (STA/HTTP stay up; AWDL attached via APSTA). Needs a ch6 router.
+* **`open`** — FoA open MAC (`firmware/reterminal-e1002-open/`): concurrent
+  `foa_sta` + `foa_awdl` VIFs. Classic ESP32 lab/companion until FoA supports
+  S3; companion frames can feed photoframe later.
 
 `patches/ESP32Drop/` adds APSTA radio ownership, listener shutdown and Mbed TLS 4
 compatibility. `patches/esp32-photoframe/` adds variant hooks, HTTP mutation
@@ -301,30 +306,22 @@ PlatformIO cache lives outside the store.
 These were evaluated against the pinned upstreams; none is a small app-page
 change, so none is faked in the tree.
 
-### esp32-ai (`slvDev/esp32-ai`) — model assets on the card, runtime not ported
+### esp32-ai (`slvDev/esp32-ai`) — SD assets + real TinyStories runtime
 
-It is not a library or an AI service client: it is a set of standalone Arduino
-sketches running a 28.9M-parameter TinyStories model locally, with 14.9 MB of
-4-bit weights in a **dedicated `model` flash partition** (`partitions.csv`:
-app 1 MB, model 14.9 MB), plus a custom runtime and Xtensa SIMD code. The
-T-Deck's 16 MB flash is already fully allocated (two 3.875 MB OTA slots +
-4.75 MB map tiles + 3.375 MB SPIFFS), and wadamesh is a ~2.55 MB app, so the
-model cannot get a flash partition here without dropping OTA and the tile
-cache.
+Upstream runs a 28.9M-parameter TinyStories model from a **dedicated `model`
+flash partition** with `runtime/llm.h`. The T-Deck's 16 MB flash has no room
+for that partition, so this tree pins `third_party/esp32-ai` and keeps the
+release `model.bin` / `tokenizer.json` on the SD card at
+`/esp32ai/tinystories/` (sizes from upstream `scripts/fetch_model.sh`).
 
-What this repository does wire in is the storage half: `firmware/tdeck-plus/esp32ai/`
-is an `ESP-AI` app page that keeps the release's `model.bin` and
-`tokenizer.json` at `/esp32ai/tinystories/` on the SD card, shows whether each
-file is present and complete, and fetches it over Wi-Fi through the shared
-downloader when it is not. The byte sizes are pinned from upstream's
-`scripts/fetch_model.sh`, so a truncated transfer is refused.
-
-Text generation still needs a real port: upstream's loader memory-maps the
-weights from a flash partition and compiles model-specific headers at deploy
-time, so pointing it at an SD file means replacing its weight access path with
-per-token `pread`s and reproducing the header generation here. That is a port
-of the runtime, not an app tile, and it is not faked with a placeholder
-generator. The page says so on screen.
+`firmware/tdeck-plus/esp32ai/llm_port.cpp` loads those weights with the same
+`llm.h`: core + tied head are staged to int8 in PSRAM (~4.2 MB); the PLE table
+and token embedding stay on the card and are read one row per token via an
+`LLM_DEQ_ROW` hook (`patches/esp32-ai/0001-deq-row-hook.patch`). Decode/encode
+tables are generated from the pinned tokenizer
+(`firmware/tdeck-plus/esp32ai/generated/`, via `scripts/esp32ai-headers.sh`).
+When both files are complete the ESP-AI page is a chat UI that calls
+`esp32aiGenerate` (ASCII prompts through `bpe_tokenizer.h`).
 
 ### CJK rendering
 
@@ -400,7 +397,9 @@ so this repository does not claim a speed-up: measure with the existing
 ## Verification status
 
 The T-Deck Plus image is compiled and linked with the pinned toolchain
-(PlatformIO/espressif32 6.11.0, `LilyGo_TDeck_companion_radio_touch`). Both E1002 variants compile and link with ESP-IDF 6.0.3 / GCC 15.3.0.
+(PlatformIO/espressif32 6.11.0, `LilyGo_TDeck_companion_radio_touch`). E1002
+`switch`/`coex` compile and link with ESP-IDF 6.0.3 / GCC 15.3.0; `open` is the
+separate FoA Rust image (ESP32).
 Nothing has been flashed or run on hardware. What was actually checked:
 
 * `scripts/patches.sh apply|status|revert` round-trips both series against the
@@ -429,7 +428,7 @@ Nothing has been flashed or run on hardware. What was actually checked:
 
 Not checked: hardware behaviour — Wi-Fi download throughput, TLS handshakes, SD write failures at
 the end of a large file, the Reader's rendering of a downloaded article, and
-esp32-ai token generation.
+on-device TinyStories token rates with the SD-backed weight path.
 
 ## Known gaps / next steps
 

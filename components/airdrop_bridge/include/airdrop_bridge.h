@@ -1,8 +1,13 @@
 // airdrop_bridge.h -- run one AirDrop receive window on an esp32-photoframe
 // device, then hand the received image to the caller.
 //
-// Default: exclusive boot-time receive window. CONFIG_AIRDROP_COEX instead
-// borrows a connected channel-6 station using a locally patched APSTA port.
+// Default (switch): exclusive boot-time receive window — ESP32Drop owns the
+// radio alone, as upstream documents.
+//
+// CONFIG_AIRDROP_COEX: ch6 2.4 GHz dual-protocol receive experiment. The router
+// must already be on channel 6 (the only 2.4 GHz AWDL channel). We keep the
+// photoframe STA/HTTP path up and attach AWDL via APSTA so the same radio can
+// receive ordinary Wi-Fi frames and AWDL/AirDrop frames on that channel.
 #pragma once
 
 #include <stdbool.h>
@@ -23,6 +28,11 @@ extern "C" {
 // How long the AirDrop window stays open once started, in milliseconds.
 #ifndef AIRDROP_BRIDGE_WINDOW_MS
 #define AIRDROP_BRIDGE_WINDOW_MS (180 * 1000)
+#endif
+
+// Only 2.4 GHz AWDL channel; coex requires the STA's AP to be on this channel.
+#ifndef AIRDROP_COEX_CHANNEL
+#define AIRDROP_COEX_CHANNEL 6
 #endif
 
 // Upper bound on the decoded transfer held in PSRAM. 0 keeps ESP32Drop's own
@@ -48,7 +58,8 @@ bool airdrop_bridge_boot_requested(void);
 
 // Run the receive window. On ESP_OK `out_path` holds the received JPEG or PNG
 // (inside the photoframe storage mount) and the radio has been released, so the
-// caller may start Wi-Fi. Coex preserves the already running station.
+// caller may start Wi-Fi. Coex keeps the already-running ch6 station up so Wi-Fi
+// and AWDL can both receive during the window.
 // A failed teardown keeps is_active() true; reboot before reusing the radio.
 //
 // Blocking; call from app_main (or a task with >= 8 KB stack headroom).

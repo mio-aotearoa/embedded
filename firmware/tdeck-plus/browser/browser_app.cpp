@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Web browser page for the T-Deck Plus.
+// Web browser page for the T-Deck Plus (Apps → Browser).
 //
 // HTML/CSS come from the pinned TactileBrowser core (third_party/TactileBrowser,
 // Lexbor inside). That core talks to the platform only through RenderInterface
 // function pointers, so it needs no LVGL 9 port: this file supplies an LVGL 8.3
 // renderer, an HTTP(S) fetcher and the page chrome. Inline scripts run on Duktape
-// (js_engine.cpp) before layout. The renderer is also what wadamesh's built-in
-// Web page uses, through browserRenderInto() in web_enhance.h; BrowserApp's own
-// chrome has no drawer tile any more and exists for that platform layer.
+// (js_engine.cpp) before layout. wadamesh's Web/Reader tile stays on the upstream
+// text-extraction path; Lexbor lives only behind this drawer app.
 #include "browser_app.h"
 
 #include "AppPage.h"
@@ -37,9 +36,9 @@ namespace
 // ---- allocator ------------------------------------------------------------
 // Lexbor's default allocator is plain malloc, which on this Arduino/IDF build
 // serves INTERNAL RAM only. A real page's DOM is several times its markup, so
-// the parse ran out of internal RAM and returned RENDER_ERROR_PARSE; the Reader
-// then quietly showed its text pass. Point Lexbor at PSRAM (internal RAM stays
-// for radio/TLS), falling back to internal only if PSRAM is exhausted.
+// the parse ran out of internal RAM and returned RENDER_ERROR_PARSE. Point
+// Lexbor at PSRAM (internal RAM stays for radio/TLS), falling back to internal
+// only if PSRAM is exhausted.
 void *lxbAlloc(size_t n)
 {
     if (n == 0) n = 1;
@@ -96,18 +95,28 @@ struct FetchState
 
 FetchState s_fetch = {};
 
-// Set while a page rendered OUTSIDE this app (wadamesh's built-in Web page) is on
-// screen: the renderer's link buttons then hand the address to that page instead
-// of to BrowserApp, which is not open in that case.
+// Optional embed path (browserRenderInto): when a host page owns the chrome,
+// link taps go there instead of to BrowserApp.
 void (*s_into_link_cb)(const char*) = nullptr;
 
-// Why the last browserRenderInto() fell back, for the Reader's status line.
+// Why the last browserRenderInto() call fell back ("ok" on success).
 const char* s_render_error = "ok";
 
 // ---- renderer -------------------------------------------------------------
 
 bool rInit(Renderer *) { return true; }
 void rCleanup(Renderer *) {}
+
+// Web pages assume a light canvas. Near-black ink on our dark chrome looked like
+// a blank black screen when CSS set color without a background.
+constexpr uint32_t kWebInk = 0x1A1A1A;
+constexpr uint32_t kWebPaper = 0xFFFFFF;
+
+static uint32_t colorLuma(uint32_t c)
+{
+    const uint32_t r = (c >> 16) & 0xff, g = (c >> 8) & 0xff, b = c & 0xff;
+    return (r * 30 + g * 59 + b * 11) / 100;
+}
 
 void *rCreateLabel(Renderer *r, const char *text, int x, int y)
 {
@@ -117,6 +126,7 @@ void *rCreateLabel(Renderer *r, const char *text, int x, int y)
     lv_obj_set_pos(label, x, y);
     lv_obj_set_width(label, lv_pct(100));
     lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_color(label, lv_color_hex(kWebInk), LV_PART_MAIN);
     lv_obj_clear_flag(label, LV_OBJ_FLAG_SCROLLABLE);
     return label;
 }
@@ -174,12 +184,17 @@ void *rCreateContainer(Renderer *r, int x, int y, int width, int height)
 
 void rSetTextColor(Renderer *, void *widget, uint32_t color)
 {
-    if (widget) lv_obj_set_style_text_color((lv_obj_t *)widget, lv_color_hex(color), LV_PART_MAIN);
+    if (!widget) return;
+    // Engine default is white; treat that as "unset" and use readable ink on paper.
+    if (color == 0xFFFFFFu || color == 0xFFFFFEu) color = kWebInk;
+    lv_obj_set_style_text_color((lv_obj_t *)widget, lv_color_hex(color), LV_PART_MAIN);
 }
 
 void rSetBgColor(Renderer *, void *widget, uint32_t color)
 {
     if (!widget) return;
+    // Pure black full-bleed fills hide the page on a dark device; keep paper.
+    if (colorLuma(color) < 8) color = kWebPaper;
     lv_obj_set_style_bg_color((lv_obj_t *)widget, lv_color_hex(color), LV_PART_MAIN);
     lv_obj_set_style_bg_opa((lv_obj_t *)widget, LV_OPA_COVER, LV_PART_MAIN);
 }
@@ -392,7 +407,7 @@ void BrowserApp::navigate(const char *url)
         lv_textarea_set_cursor_pos(ta_, LV_TEXTAREA_CURSOR_LAST);
     }
     s_fetch.running = true;
-    setStatus(TR("Loading..."));
+    setStatus(TR("Connecting\xE2\x80\xA6"));
 
     if (xTaskCreatePinnedToCore(fetchTask, "browser-fetch", 8192, nullptr, 1, nullptr, 0) != pdPASS)
     {
@@ -603,7 +618,7 @@ void BrowserApp::linkCb(lv_event_t *e)
     // the tree here would delete the widget that is still dispatching.
     appPageBindTextField(nullptr);   // following a link is not typing
     if (s_active) s_active->navigate(url);
-    else if (s_into_link_cb) s_into_link_cb(url);   // built-in Web page owns the page
+    else if (s_into_link_cb) s_into_link_cb(url);   // embed host owns navigation
 }
 
 void BrowserApp::tickCb(lv_timer_t *)

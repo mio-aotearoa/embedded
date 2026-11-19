@@ -40,20 +40,19 @@ apps and ours, and the env keeps this repository's USB-only one-slot partition
 table instead of the fork's dual 4.5 MB slots.
 
 * `0001-kiwix-esp32ai-periodic-apps.patch` — registers this repository's apps in
-  wadamesh's T-Deck environment. Small hunks: the `kiwix_app.h` and
-  `esp32ai_app.h` includes, the drawer tiles and `appLaunch()` cases for Kiwix,
-  ESP-AI, Elements, LocalSend, Download and (through the existing `APPACT_READER`
-  tile) Web, and an `extern "C" wadameshOpenReaderUrl()` wrapper
-  around the firmware's existing `openReaderPage()` so articles are rendered by
-  the built-in Reader. `platformio.ini` gets the include paths, zstd defines and
-  `build_src_filter` entries that compile `firmware/tdeck-plus/{kiwix,common,esp32ai}/`
-  and the pinned zstd decompressor into the env, plus `-D WADAMESH_KIWIX=1` and
-  `-D WADAMESH_ESP32AI=1` so every hook is compiled only in that env. No
-  wadamesh source is modified in substance: the Reader's fetch follows redirects
-  and hands fetched markup to our renderer, local `.htm`/`.html` files (the Kiwix
-  article) are laid out by it too, and the hardware-keyboard path routes
-  characters into app-page fields. Removing the series restores the upstream tree
-  exactly.
+  wadamesh's T-Deck environment. Small hunks: the `kiwix_app.h`,
+  `esp32ai_app.h` and `browser_app.h` includes, the drawer tiles and
+  `appLaunch()` cases for Kiwix, ESP-AI, Elements, LocalSend, Download, Web
+  (`APPACT_READER`, upstream text Reader) and Browser (`APPACT_BROWSER` →
+  `BrowserApp::launch`), plus an `extern "C" wadameshOpenReaderUrl()` wrapper
+  around `openReaderPage()` so Kiwix articles open in the Reader.
+  `platformio.ini` gets the include paths, zstd defines and `build_src_filter`
+  entries that compile `firmware/tdeck-plus/{kiwix,common,esp32ai,browser}/`
+  and the pinned zstd/TactileBrowser pieces, plus `-D WADAMESH_KIWIX=1`,
+  `-D WADAMESH_ESP32AI=1` and `-D WADAMESH_BROWSER=1`. Removing the series
+  restores the upstream tree exactly. The same patch also wires the SD format
+  chooser, live Web/Reader fetch stages in the status line, and
+  `readerWebFont()` for the Browser app's CJK faces.
 
 ## esp32-photoframe
 
@@ -77,9 +76,19 @@ table instead of the fork's dual 4.5 MB slots.
 
 ## TactileBrowserCore
 
-`third_party/TactileBrowser` itself (not the nested Lexbor repo) carries one
-patch: `0001-text-style` adds an optional `set_text_style` callback to
-`RenderInterface` and calls it with the font size and weight the DOM/CSS
-computed. Without it the engine threw that sizing away, every label used the
-same face, and a laid-out page was indistinguishable from the Reader's text
-pass. Its `dir` is `TactileBrowser`, so it applies beside the Lexbor series.
+`third_party/TactileBrowser` itself (not the nested Lexbor repo) carries:
+
+* `0001-text-style` — optional `set_text_style` on `RenderInterface` so headings
+  keep a larger/bolder face instead of every label using 14 px.
+* `0002-default-ink-on-paper` — default text/background are dark ink on white
+  paper (sites assume a light canvas; white-on-transparent looked blank on the
+  T-Deck's night chrome).
+
+Its `dir` is `TactileBrowser`, so both apply beside the Lexbor series.
+
+## esp32-ai
+
+* `0001-deq-row-hook.patch` — adds `LLM_DEQ_ROW` so platforms that keep int4
+  weights off a linear map (the T-Deck reads them from the SD card) can override
+  the two `deq_row` calls in `llm_forward` without forking the rest of
+  `runtime/llm.h`.

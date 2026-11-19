@@ -1,0 +1,35 @@
+diff --git a/runtime/llm.h b/runtime/llm.h
+index 36ba610..76d9bfc 100644
+--- a/runtime/llm.h
++++ b/runtime/llm.h
+@@ -131,6 +131,12 @@ static inline void deq_row(const QT *t, int r, float *out) {
+   }
+ }
+ 
++/* Platforms that keep int4 weights off a linear map (e.g. SD) override this. */
++#ifndef LLM_DEQ_ROW
++#define LLM_DEQ_ROW(t, r, out) deq_row((t), (r), (out))
++#endif
++
++
+ // y[row_begin:row_end] = W * x for a quant tensor W. Keeping the row range
+ // explicit lets platforms parallelize the large output head without changing
+ // any individual dot product.
+@@ -446,7 +452,7 @@ static void llm_forward(Model *m, int token, int pos, Scratch *s) {
+   uint64_t profile_t0 = (uint64_t)LLM_PROFILE_NOW();
+ #endif
+ 
+-  deq_row(&m->tok_emb, token, s->x);           // embedding
++  LLM_DEQ_ROW(&m->tok_emb, token, s->x);           // embedding
+ 
+   // ---- per-layer input: (RMSNorm(proj(x)/sqrt(D)) + table[tok]*sqrt(P)) / sqrt(2)
+   LLM_LMV(m, &m->ple_model_proj, s->x, s->tmpP); // [L*P]
+@@ -454,7 +460,7 @@ static void llm_forward(Model *m, int token, int pos, Scratch *s) {
+   for (int i = 0; i < L * P; i++) s->tmpP[i] *= dscale;
+   for (int l = 0; l < L; l++)
+     rmsnorm(s->tmpP + l * P, m->ple_proj_norm, P, s->tmpP + l * P);
+-  deq_row(&m->ple_table, token, s->trow);      // [L*P]
++  LLM_DEQ_ROW(&m->ple_table, token, s->trow);      // [L*P]
+   float sp = sqrtf((float)P), inv2 = 0.70710678f;
+   for (int i = 0; i < L * P; i++)
+     s->ple[i] = (s->tmpP[i] + s->trow[i] * sp) * inv2;

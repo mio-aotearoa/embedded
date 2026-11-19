@@ -1,5 +1,5 @@
 diff --git a/platformio.ini b/platformio.ini
-index 03a11235..d7daf3af 100644
+index 03a11235..6d7b75ed 100644
 --- a/platformio.ini
 +++ b/platformio.ini
 @@ -544,7 +544,13 @@ platform = platformio/espressif32@6.11.0
@@ -17,7 +17,7 @@ index 03a11235..d7daf3af 100644
  extra_scripts = pre:scripts/build/pre_gen_baked.py, pre:scripts/inject_wifi_env.py, pre:scripts/build/fatfs_exfat.py, pre:scripts/build/patch_lvgl_anim_uaf.py, pre:scripts/build/patch_lvgl_scroll_uaf.py, pre:scripts/build/patch_lvgl_async_del.py, pre:scripts/build/patch_lvgl_arabic.py, pre:scripts/build/patch_meshcore_txt_timestamp.py, pre:scripts/build/perf_lvgl.py, merge-bin.py
  custom_lvgl_o2 = core, draw, font, misc   ; LVGL's per-frame code at -O2 (scripts/build/perf_lvgl.py); widgets and extra stay -Os
  ; custom_lvgl_iram = lv_draw_sw_blend.c, lv_draw_label.c   ; off on the T-Deck: its ~6 KB of internal RAM is worth more than ~8% of a frame (on-device updates and TLS ran out)
-@@ -686,6 +692,51 @@ build_flags =
+@@ -686,6 +692,54 @@ build_flags =
    -D CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=16384
    -D CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=4096
  
@@ -37,10 +37,13 @@ index 03a11235..d7daf3af 100644
 +  -D ZSTD_DISABLE_ASM=1
 +  -D ZSTD_STRIP_ERROR_STRINGS=1
 +
-+  ; --- esp32-ai model manager: assets on the SD card, fetched over Wi-Fi ---
++  ; --- esp32-ai: SD-backed TinyStories runtime (llm.h) + asset manager ---
 +  -D WADAMESH_ESP32AI=1
++  -D LLM_INT8_ACT=1
 +  -I ../../firmware/tdeck-plus/common
 +  -I ../../firmware/tdeck-plus/esp32ai
++  -I ../../firmware/tdeck-plus/esp32ai/generated
++  -I ../../third_party/esp32-ai/runtime
 +
 +  ; --- periodic table: NeoCalculator's element data, drawn as one LVGL grid ---
 +  -D WADAMESH_PERIODIC=1
@@ -69,7 +72,7 @@ index 03a11235..d7daf3af 100644
  build_src_filter =
    +<*.cpp>
    +<*.c>
-@@ -696,6 +747,45 @@ build_src_filter =
+@@ -696,6 +750,45 @@ build_src_filter =
    +<ui-touch/*.cpp>
    +<ui-touch/*.c>
    +<../variants/lilygo_tdeck/*.cpp>
@@ -145,7 +148,7 @@ index 484c510a..b05aad5f 100644
   * Create a page root: full width, from just under the status bar to the bottom of the
   * screen, on lv_layer_top, opaque `bg_color`, non-scrollable and CLICKABLE so no press
 diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
-index 1f84c418..56416df7 100644
+index f799c2e4..94d34302 100644
 --- a/src/ui-touch/UITask.cpp
 +++ b/src/ui-touch/UITask.cpp
 @@ -158,6 +158,24 @@ static void* wadaMp3Scratch() { return s_wada_mp3_scratch; }
@@ -187,54 +190,162 @@ index 1f84c418..56416df7 100644
  lv_obj_t* appPageCreateRoot(uint32_t bg_color) {
    lv_obj_t* root = lv_obj_create(lv_layer_top());
    lv_obj_remove_style_all(root);
-@@ -34238,6 +34263,19 @@ static const char    kReaderHomeUrl[] = "sd:/home.htm";
+@@ -3231,6 +3256,8 @@ static void batteryTapCb(lv_event_t* e);   // fwd decl (defined near the battery
+ volatile bool g_usb_files_owns_serial = false;
+ static volatile uint32_t g_sd_io_ms = 0;
+ static inline void markSdIo() { const uint32_t t = millis(); g_sd_io_ms = t ? t : 1; }
++// Firmware helpers outside this TU (http_download.cpp) light the same LED.
++extern "C" void meshcomodMarkSdIo(void) { markSdIo(); }
+ 
+ // Async mesh-request activity: a small spinner glyph in the status bar while a
+ // request is sending or awaiting a reply. markMeshRequest() stamps a send; the
+@@ -29957,7 +29984,19 @@ static const char* sdRemovedAlertText() {
+                           : TR("SD card removed");
+ }
+ #endif
+-static int       s_sd_format_pending = 0;   // deferred FAT32 format (runs after notice paints)
++static int       s_sd_format_pending = 0;   // deferred format (runs after notice paints)
++
++// Filesystem picked in the SD format dialog. FatFs option bits: MC_FM_FAT32 is
++// 0x02; exFAT is 0x04 (the fatfs_exfat pre-script compiles exFAT in). LittleFS
++// is not offered here: Arduino's LittleFS mounts a partition, not a card, so a
++// LittleFS-formatted SD cannot be mounted by the SD library this UI browses.
++#ifndef MC_FM_EXFAT
++  #define MC_FM_EXFAT 0x04
++#endif
++static uint8_t   s_sd_format_opt  = MC_FM_FAT32;
++static const char* s_sd_format_name = "FAT32";
++static lv_obj_t* s_sd_format_menu = nullptr;
++static char      s_sd_format_msg[160];
+ static lv_obj_t* s_fm_fmt_overlay = nullptr; // full-screen "formatting..." notice
+ static lv_obj_t* s_fm_actions    = nullptr;  // per-entry action sheet
+ static lv_obj_t* s_fm_prompt     = nullptr;  // text-input modal (rename / new folder)
+@@ -31862,12 +31901,73 @@ static void fmSdDoFormat() {
+       g_lv.task->showAlert(TR("SD is busy - close tools and retry"), 2600);
+     return;
+   }
+-  fmShowBusyOverlay("Formatting SD as MESHCOMOD (FAT32)\n\n"
+-                    "Creates the core folders too.\n"
+-                    "Do NOT power off, disconnect,\nor remove the card.\n\n"
+-                    "This can take up to a minute...");
++  snprintf(s_sd_format_msg, sizeof s_sd_format_msg,
++           "Formatting SD as %s%s\n\n"
++           "%s"
++           "Do NOT power off, disconnect,\nor remove the card.\n\n"
++           "This can take up to a minute...",
++           s_sd_format_name,
++           s_sd_format_opt == MC_FM_FAT32 ? " (MESHCOMOD)" : "",
++           s_sd_format_opt == MC_FM_FAT32 ? "Creates the core folders too.\n" : "");
++  fmShowBusyOverlay(s_sd_format_msg);
+   s_sd_format_pending = 2;
+ }
++
++// Filesystem chooser for the SD format action. FAT32 is the MESHCOMOD layout;
++// exFAT is available for cards shared with desktops that cannot use FAT32.
++static void fmSdFormatMenuClose() {
++  if (s_sd_format_menu) { lv_obj_del_async(s_sd_format_menu); s_sd_format_menu = nullptr; }
++}
++static void fmSdFormatPickCb(lv_event_t* e) {
++  if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
++  s_sd_format_opt = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
++  s_sd_format_name = s_sd_format_opt == MC_FM_EXFAT ? "exFAT" : "FAT32";
++  fmSdFormatMenuClose();
++  fmSdDoFormat();
++}
++static void fmSdFormatCancelCb(lv_event_t* e) {
++  if (lv_event_get_code(e) == LV_EVENT_CLICKED) fmSdFormatMenuClose();
++}
++static void fmSdFormatMenu() {
++  if (s_sd_format_menu) return;
++  lv_obj_t* m = lv_obj_create(lv_layer_top());
++  s_sd_format_menu = m;
++  lv_obj_set_size(m, 270, 196);
++  lv_obj_center(m);
++  lv_obj_set_style_bg_color(m, lv_color_hex(0x1B2026), 0);
++  lv_obj_set_style_border_width(m, 1, 0);
++  lv_obj_set_style_border_color(m, lv_color_hex(0x3A424C), 0);
++  lv_obj_set_style_radius(m, 8, 0);
++  lv_obj_clear_flag(m, LV_OBJ_FLAG_SCROLLABLE);
++
++  lv_obj_t* title = lv_label_create(m);
++  lv_label_set_text(title, "Format SD card as:");
++  lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 6);
++
++  lv_obj_t* warn = lv_label_create(m);
++  lv_label_set_text(warn, "All data on the card will be erased.");
++  lv_obj_set_style_text_color(warn, lv_color_hex(0xB0B8C0), 0);
++  lv_obj_align(warn, LV_ALIGN_TOP_MID, 0, 28);
++
++  static const char* names[2] = {"FAT32 (MESHCOMOD)", "exFAT"};
++  static const uint8_t opts[2] = {MC_FM_FAT32, MC_FM_EXFAT};
++  for (int i = 0; i < 2; ++i) {
++    lv_obj_t* b = lv_btn_create(m);
++    lv_obj_set_size(b, 226, 38);
++    lv_obj_align(b, LV_ALIGN_TOP_MID, 0, 56 + i * 44);
++    lv_obj_t* l = lv_label_create(b);
++    lv_label_set_text(l, names[i]);
++    lv_obj_center(l);
++    lv_obj_add_event_cb(b, fmSdFormatPickCb, LV_EVENT_CLICKED, (void*)(uintptr_t)opts[i]);
++  }
++  lv_obj_t* c = lv_btn_create(m);
++  lv_obj_set_size(c, 226, 34);
++  lv_obj_align(c, LV_ALIGN_BOTTOM_MID, 0, -6);
++  lv_obj_t* cl = lv_label_create(c);
++  lv_label_set_text(cl, "Cancel");
++  lv_obj_center(cl);
++  lv_obj_add_event_cb(c, fmSdFormatCancelCb, LV_EVENT_CLICKED, nullptr);
++}
+ // Tap on an unmounted SD row: try to mount, and if the card is unreadable
+ // (no FAT16/FAT32/exFAT volume, or a corrupt one) offer to format.
+ static void fmSdMountOrFormatCb(lv_event_t* e) {
+@@ -31875,7 +31975,7 @@ static void fmSdMountOrFormatCb(lv_event_t* e) {
+   s_sd_retry_after_ms = 0;   // explicit user retry — bypass the mount backoff
+   if (fmSdTryMount()) { fmShowRoots(); return; }
+   s_confirm_owner_next = true;
+-  showConfirm(TR("Format SD as MESHCOMOD (FAT32)?\nAll data on the card will be erased."), TR("Format"), fmSdDoFormat);
++  fmSdFormatMenu();
+ }
+ 
+ // Seed the core folder layout on a freshly-formatted MESHCOMOD card. These back
+@@ -31966,7 +32066,7 @@ static void sdWriteFatLabel(uint8_t pdrv, const char* label) {
+ static void fmSdLongPressFormatCb(lv_event_t* e) {
+   if (lv_event_get_code(e) != LV_EVENT_LONG_PRESSED) return;
+   s_confirm_owner_next = true;
+-  showConfirm(TR("Reformat SD as MESHCOMOD (FAT32)?\nALL data on the card will be erased."), TR("Format"), fmSdDoFormat);
++  fmSdFormatMenu();
+ }
+ 
+ #endif  // HAS_TDECK_GT911 || HAS_THINKNODE_M9 (microSD mount/format helpers)
+@@ -34244,6 +34344,7 @@ static const char    kReaderHomeUrl[] = "sd:/home.htm";
  static const char    kReaderChangelogUrl[] = "http://wadamesh.com/changelog.html";
  static lv_obj_t*     s_reader_root   = nullptr;
  static lv_obj_t*     s_reader_url_ta = nullptr;
 +
-+#if defined(WADAMESH_BROWSER)
-+// The address bar, history and back bar belong to this page; the layout of the
-+// page itself is done by our Lexbor renderer (browserRenderInto), which is the
-+// same engine the separate Browser app used. One web app, one fetch path.
-+#include "web_enhance.h"
-+static void readerStart(const char* in);   // the navigation entry point, further down
-+static char*  s_reader_html = nullptr;     // last fetched page, kept for the renderer
-+static size_t s_reader_html_len = 0;
-+static size_t s_reader_html_skip = 0;   // page size when the markup did not fit the cap
-+static constexpr size_t kReaderHtmlCap = 512 * 1024;   // Lexbor buffer: one fetched or local HTML page
-+static void readerRendererLinkCb(const char* href) { if (href && href[0]) readerStart(href); }
-+#endif
  static lv_obj_t*     s_reader_go     = nullptr;
  static lv_obj_t*     s_reader_editbtn= nullptr;    // floating "edit URL" button (shown while reading)
  static lv_obj_t*     s_reader_scroll = nullptr;    // flex-column body container (holds text + link labels)
-@@ -34334,6 +34372,15 @@ static bool readerIsTextPath(const char* url) {
-   auto ends = [&](const char* ext) { const size_t e = strlen(ext); return n >= e && strncasecmp(url + n - e, ext, e) == 0; };
-   return ends(".txt") || ends(".md");
- }
-+// Local files the layout engine gets to render. The Kiwix reader writes every
-+// ZIM article to the card as article.htm, so this is the path that gives
-+// offline articles CSS instead of the flat text view.
-+static bool readerIsHtmlPath(const char* url) {
-+  const char* q = strchr(url, '?');
-+  const size_t n = q ? (size_t)(q - url) : strlen(url);
-+  auto ends = [&](const char* ext) { const size_t e = strlen(ext); return n >= e && strncasecmp(url + n - e, ext, e) == 0; };
-+  return ends(".htm") || ends(".html");
-+}
- static ReaderLocalResult readerReadLocal(const char* url, uint8_t* raw, size_t capacity,
-                                          size_t* total, uint32_t generation,
-                                          size_t* file_size = nullptr, size_t* window_at = nullptr) {
-@@ -34405,6 +34452,10 @@ static ReaderLocalResult readerReadLocal(const char* url, uint8_t* raw, size_t c
- 
- // Worker (core 0): load s_reader_url, strip to s_reader_text, publish via s_reader_dirty.
- static void readerFetchBody() {
-+#if defined(WADAMESH_BROWSER)
-+  s_reader_html_len = 0;   // new load: never render the previous page's markup
-+  s_reader_html_skip = 0;
-+#endif
-   const uint32_t generation = s_reader_task_generation;
-   char url[300]; strncpy(url, s_reader_url, sizeof url - 1); url[sizeof url - 1] = 0;
-   bool result_ok = false;
-@@ -34429,13 +34480,40 @@ static void readerFetchBody() {
+@@ -34262,7 +34363,7 @@ static auto&         s_reader_pending_url = psramStatic<char[300]>();
+ static char          s_reader_msg[110] = "";       // status text (worker writes, UI shows)
+ static TaskHandle_t  s_reader_task    = nullptr;
+ static bool          s_reader_pristine = false;    // URL field still holds the untouched default
+-static const size_t  kReaderRawCap  = 192 * 1024;  // max raw HTML we buffer (PSRAM)
++static const size_t  kReaderRawCap  = 512 * 1024;  // max raw HTML we buffer (PSRAM); matches kReaderHtmlCap
+ static const size_t  kReaderTextCap =  60 * 1024;  // max extracted text we keep
+ // Links found on the page: byte range in s_reader_text + resolved absolute href.
+ using ReaderLink = ReaderContent::Link;
+@@ -34429,20 +34530,61 @@ static void readerFetchBody() {
+   if (!raw) { rawcap = 24 * 1024; raw = (uint8_t*)heap_caps_malloc(rawcap, MALLOC_CAP_SPIRAM); }
+   int code = -1; size_t total = 0; bool source_ok = false;
+   ReaderLocalResult local_result = ReaderLocalResult::NoStorage;
++  auto progress = [&](const char* msg) {
++    if (generation != s_reader_generation || !msg) return;
++    snprintf(s_reader_msg, sizeof s_reader_msg, "%s", msg);
++    s_reader_dirty = true;
++  };
+   if (raw) {
+     if (local) {
++      progress("Reading SD\xe2\x80\xa6");
+       local_result = readerReadLocal(url, raw, rawcap - 1, &total, generation,
                                       text_mode ? &txt_size : nullptr, text_mode ? &txt_at : nullptr);
        source_ok = local_result == ReaderLocalResult::Ok;
      } else {
@@ -250,15 +361,22 @@ index 1f84c418..56416df7 100644
 -      if (began) { httpc.addHeader("Accept-Encoding", "identity"); code = httpc.GET(); }
 +      WiFiClientSecure scli; WiFiClient pcli;
 +      for (int hop = 0; hop <= 4; ++hop) {
++        const bool tls = readerCiPrefix(url, strlen(url), "https://");
++        if (hop == 0) progress(tls ? "TLS connect\xe2\x80\xa6" : "Connecting\xe2\x80\xa6");
++        else {
++          char hopmsg[48];
++          snprintf(hopmsg, sizeof hopmsg, "Redirect %d\xe2\x80\xa6", hop);
++          progress(hopmsg);
++        }
 +        httpc.setReuse(false); httpc.setConnectTimeout(9000); httpc.setTimeout(15000);
 +        httpc.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
 +        httpc.setUserAgent("Mozilla/5.0 (compatible; wadamesh-reader)");
-+        const bool tls = readerCiPrefix(url, strlen(url), "https://");
 +        bool began;
 +        if (tls) { scli.setInsecure(); began = httpc.begin(scli, url); }
 +        else     {                     began = httpc.begin(pcli, url); }
 +        if (!began) { httpc.end(); break; }
 +        httpc.addHeader("Accept-Encoding", "identity");
++        progress(tls ? "HTTPS GET\xe2\x80\xa6" : "HTTP GET\xe2\x80\xa6");
 +        code = httpc.GET();
 +        if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
 +          String loc = httpc.header("Location");
@@ -279,48 +397,37 @@ index 1f84c418..56416df7 100644
 +        break;
 +      }
        if (code == HTTP_CODE_OK) {
++        progress("Downloading\xe2\x80\xa6");
          ReaderBufferStream sink(raw, rawcap - 1, generation);
          const int transfer_result = httpc.writeToStream(&sink);
-@@ -34494,6 +34572,31 @@ static void readerFetchBody() {
-       if (tl == 0) { strcpy(s_reader_text, "(no readable text on this page)"); s_reader_nlinks = 0; }
-       snprintf(result_msg, sizeof result_msg, "%s", url); result_ok = true; }
-     else snprintf(result_msg, sizeof result_msg, "Out of memory");
-+#if defined(WADAMESH_BROWSER)
-+    // Keep the markup for the renderer. Fetched pages are laid out, and so are
-+    // local HTML files — the Kiwix reader writes every ZIM article to the card
-+    // as HTML. A document bigger than the buffer stays on the text pass: half a
-+    // laid-out page would silently lose its tail, while the text pass keeps the
-+    // whole article. Text extraction above is still the fallback when the layout
-+    // engine rejects a page.
-+    //
-+    // This block deliberately lives AFTER the two text branches: it used to sit
-+    // inside the text_mode branch, where `!local` could never be true, so the
-+    // renderer never saw a fetched page.
-+    const bool html_page = local ? readerIsHtmlPath(url) : true;
-+    if (html_page && !text_mode && total) {
-+      if (total < kReaderHtmlCap) {
-+        if (!s_reader_html) s_reader_html = (char*)heap_caps_malloc(kReaderHtmlCap, MALLOC_CAP_SPIRAM);
-+        if (s_reader_html) {
-+          memcpy(s_reader_html, raw, total);
-+          s_reader_html[total] = 0;
-+          s_reader_html_len = total;
-+        }
-+      } else {
-+        s_reader_html_skip = total;   // too big: the text pass gets the whole page
-+      }
-+    }
-+#endif
+         total = sink.size();
+@@ -34451,6 +34593,7 @@ static void readerFetchBody() {
+       httpc.end();
+     }
    }
-   else if (local) {
-     const bool home = strcmp(url, kReaderHomeUrl) == 0;
-@@ -34642,10 +34745,49 @@ static void readerShowMessage(const char* msg, uint32_t color) {
++  if (source_ok) progress("Parsing page\xe2\x80\xa6");
+   if (!raw) snprintf(result_msg, sizeof result_msg, "Out of memory");
+   else if (source_ok && total >= 2 && raw[0] == 0x1f && (uint8_t)raw[1] == 0x8b)
+     snprintf(result_msg, sizeof result_msg, "Page is gzip-compressed \xe2\x80\x94 not supported yet");
+@@ -34647,7 +34790,26 @@ static void readerShowMessage(const char* msg, uint32_t color) {
+   lv_obj_set_style_text_color(l, lv_color_hex(color), LV_PART_MAIN);
    lv_label_set_text(l, msg);
  }
- static void readerShowLoading() { readerShowMessage(LV_SYMBOL_REFRESH "  Loading\xe2\x80\xa6", 0x6FB7FF); }
+-static void readerShowLoading() { readerShowMessage(LV_SYMBOL_REFRESH "  Loading\xe2\x80\xa6", 0x6FB7FF); }
++static void readerShowLoading() {
++  // Prefer the live fetch stage (Connecting / redirect / Downloading NNk / …)
++  // over a generic spinner label so the body matches the status bar.
++  char line[128];
++  if (s_reader_msg[0])
++    snprintf(line, sizeof line, LV_SYMBOL_REFRESH "  %s", s_reader_msg);
++  else
++    snprintf(line, sizeof line, LV_SYMBOL_REFRESH "  Loading\xe2\x80\xa6");
++  readerShowMessage(line, 0x6FB7FF);
++}
 +#if defined(WADAMESH_BROWSER)
-+// The renderer reports a pixel size, not a face. Map it onto the Reader's three
-+// CJK-capable fonts: headings become 16 px/bold instead of every label using the
-+// same 14 px face, which is why a laid-out page read as plain text.
++// Fonts for the separate Browser app (Lexbor layout). Kept here so it can use
++// the same CJK-capable faces as the rest of the UI; the Web/Reader tile stays
++// on the upstream text extraction path.
 +const lv_font_t* readerWebFont(int px, bool bold) {
 +  if (px >= 16) return bold ? &g_font_semi_16 : &g_font_16;
 +  if (px >= 14) return bold ? &g_font_semi_14 : &g_font_14;
@@ -330,40 +437,7 @@ index 1f84c418..56416df7 100644
  // Rebuild the body: flowing text split into paragraph labels + tappable link labels.
  static void readerRenderBody() {
    if (!s_reader_scroll) return;
-   lv_obj_clean(s_reader_scroll);
-+#if defined(WADAMESH_BROWSER)
-+  // Rich layout when we have the markup: HTML/CSS, inline scripts and tappable
-+  // links. The text view below remains the fallback.
-+  if (s_reader_html_len) {
-+    // The renderer places children absolutely, so they get their own plain
-+    // container: the body itself may still carry the text view's flex flow.
-+    lv_obj_t* page = lv_obj_create(s_reader_scroll);
-+    lv_obj_remove_style_all(page);
-+    lv_obj_clear_flag(page, LV_OBJ_FLAG_SCROLLABLE);
-+    lv_obj_set_style_pad_all(page, 0, LV_PART_MAIN);
-+    lv_obj_set_pos(page, 0, 0);
-+    const lv_coord_t body_w = lv_obj_get_width(s_reader_scroll);
-+    lv_obj_set_width(page, body_w > 40 ? body_w - 16 : lv_disp_get_hor_res(nullptr) - 24);
-+    lv_obj_set_height(page, LV_SIZE_CONTENT);
-+    if (browserRenderInto(page, s_reader_url, s_reader_html, s_reader_html_len,
-+                          readerRendererLinkCb)) {
-+      lv_obj_scroll_to_y(s_reader_scroll, 0, LV_ANIM_OFF);
-+      if (s_reader_status) lv_label_set_text_fmt(s_reader_status, "%s  |  html", s_reader_msg);
-+      return;
-+    }
-+    lv_obj_del(page);
-+    lv_obj_clean(s_reader_scroll);
-+    // Say which pass produced the page: "html" above, otherwise the reason.
-+    if (s_reader_status) {
-+      if (s_reader_html_len) lv_label_set_text_fmt(s_reader_status, "text: %s", browserLastRenderError());
-+      else if (s_reader_html_skip) lv_label_set_text_fmt(s_reader_status, "text: %u KB page", (unsigned)(s_reader_html_skip / 1024));
-+    }
-+  }
-+#endif
-   lv_obj_set_flex_flow(s_reader_scroll, LV_FLEX_FLOW_COLUMN);
-   lv_obj_set_flex_align(s_reader_scroll, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-   lv_obj_set_style_pad_row(s_reader_scroll, 2, LV_PART_MAIN);
-@@ -61832,6 +61974,31 @@ static unsigned long s_hw_last_space_ms = 0;
+@@ -61843,6 +62005,31 @@ static unsigned long s_hw_last_space_ms = 0;
  // Route a physical-keyboard character into the textarea currently being edited
  // — the on-screen keyboard's target, which is the chat composer directly or the
  // settings mirror textarea. No field open -> the key is ignored.
@@ -395,7 +469,7 @@ index 1f84c418..56416df7 100644
  static void handleHwKey(int key) {
    if (key != ' ') s_hw_last_space_ms = 0;
    if (!g_lv.keyboard) return;
-@@ -62026,6 +62193,33 @@ if (g_lv.task && g_lv.task->isManualLock()) {
+@@ -62037,6 +62224,33 @@ if (g_lv.task && g_lv.task->isManualLock()) {
      if (g_lv.keyboard) lv_keyboard_set_textarea(g_lv.keyboard, nullptr);
      ta_focused = nullptr;
    }
@@ -429,7 +503,7 @@ index 1f84c418..56416df7 100644
  #if CAP_KEYPAD_NAV && !defined(TLORA_PAGER)
    // Edit mode (keyboard-nav ON only): a focused field becomes the typing target after
    // select/Enter (below) — until then `ta` is null so the nav keys navigate. With
-@@ -62366,6 +62560,11 @@ if (g_lv.task && g_lv.task->isManualLock()) {
+@@ -62377,6 +62591,11 @@ if (g_lv.task && g_lv.task->isManualLock()) {
      }
      accentBoxHide();
    } else if (key == ' ') {
@@ -441,7 +515,7 @@ index 1f84c418..56416df7 100644
      // Double-tap SPACE within kDoubleSpaceMs toggles between English and
      // the configured secondary keyboard. If no secondary is set, it behaves
      // as a normal space. The limit is 250 ms, except on the M9: its same-key
-@@ -62394,6 +62593,7 @@ if (g_lv.task && g_lv.task->isManualLock()) {
+@@ -62405,6 +62624,7 @@ if (g_lv.task && g_lv.task->isManualLock()) {
        lv_textarea_add_char(ta, ' ');
      }
    } else if (key == 0x0D) {                   // regular ENTER (CR)
@@ -449,7 +523,7 @@ index 1f84c418..56416df7 100644
      // Enter is a non-typing action (send / newline / submit) — always tear down the
      // accent + @-mention popups. The Enter-to-send path keeps the keyboard up "for the
      // next message", so without this the accent box for the last letter lingers over
-@@ -66897,6 +67097,21 @@ enum AppDrawerAction {
+@@ -66908,6 +67128,24 @@ enum AppDrawerAction {
    APPACT_SOUND,
    APPACT_DRONE,
    APPACT_PHOTOS,
@@ -468,19 +542,25 @@ index 1f84c418..56416df7 100644
 +#if WADAMESH_DOWNLOAD
 +  APPACT_DOWNLOAD,
 +#endif
++#if WADAMESH_BROWSER
++  APPACT_BROWSER,
++#endif
    APPACT_LUA_BASE = 100,   // APPACT_LUA_BASE + i = installed Lua app s_lua_inst[i]
  };
  // OTP Messenger (app drawer -> APPACT_OTP): the screens; protocol in OtpCore.cpp.
-@@ -67023,7 +67238,7 @@ static const AppTileDef k_app_tiles[] = {
+@@ -67041,7 +67279,10 @@ static const AppTileDef k_app_tiles[] = {
  #endif
    { UI_ICON_SLIDERS_HORIZONTAL, "Settings",  APPACT_SETTINGS,  HUE_SYS },     // "!" when an update waits
  #if defined(MULTI_TRANSPORT_COMPANION) && CAP_WEB_BROWSER
 -  { UI_ICON_GLOBE,              "Web",       APPACT_READER,    HUE_PLACE },   // on-device text browser
-+  { UI_ICON_GLOBE,              "Web",       APPACT_READER,    HUE_PLACE },   // on-device web browser (Lexbor layout)
++  { UI_ICON_GLOBE,              "Web",       APPACT_READER,    HUE_PLACE },   // on-device text browser (upstream)
++#endif
++#if WADAMESH_BROWSER
++  { UI_ICON_MONITOR,            "Browser",   APPACT_BROWSER,   HUE_PLACE },   // HTML/CSS via Lexbor
  #endif
  #if CAP_FILESYSTEM || defined(TLORA_PAGER)
    { UI_ICON_FOLDER,             "Files",     APPACT_FILES,     HUE_SYS },
-@@ -67038,6 +67253,21 @@ static const AppTileDef k_app_tiles[] = {
+@@ -67056,6 +67297,21 @@ static const AppTileDef k_app_tiles[] = {
    { UI_ICON_GAMEPAD_2,          "Snake",     APPACT_SNAKE,     HUE_MSG },     // native snake (Lua boards install it from the Store)
  #else
    { UI_ICON_STORE,              "Store",     APPACT_STORE,     HUE_MSG },     // Lua app store
@@ -502,16 +582,17 @@ index 1f84c418..56416df7 100644
  #endif
    { UI_ICON_HOUSE,              "Home",      APPACT_CMDCENTER, HUE_SYS },     // back to the Home widgets
    { UI_ICON_POWER,              "Power",     APPACT_POWER,     kAppHueDanger },
-@@ -67422,7 +67652,7 @@ static void appLaunch(int act, lv_event_t* e) {
-     case APPACT_REMOTE:    openRemotePage();     return;   // reboot into the web-resolution headless UI
+@@ -67441,6 +67697,9 @@ static void appLaunch(int act, lv_event_t* e) {
  #endif
  #if defined(MULTI_TRANSPORT_COMPANION) && CAP_WEB_BROWSER
--    case APPACT_READER:    openReaderPage();     return;   // on-device text browser (no proxy)
-+    case APPACT_READER:    openReaderPage();     return;   // on-device web browser (no proxy)
+     case APPACT_READER:    openReaderPage();     return;   // on-device text browser (no proxy)
++#endif
++#if WADAMESH_BROWSER
++    case APPACT_BROWSER:   BrowserApp::launch(); return;   // Lexbor HTML/CSS layout
  #endif
      case APPACT_ADVERT:    openAdvertModalCb(e);  return;
      case APPACT_POWER:     openPowerMenu();      return;
-@@ -67434,6 +67664,21 @@ static void appLaunch(int act, lv_event_t* e) {
+@@ -67452,6 +67711,21 @@ static void appLaunch(int act, lv_event_t* e) {
  #else
      case APPACT_SNAKE:     SnakeGame::launch();  return;
  #endif
@@ -533,7 +614,7 @@ index 1f84c418..56416df7 100644
  #if defined(HAS_TOUCH_UI)
      case APPACT_TERMINAL:  homeTerminalCb(e);    return;
  #endif
-@@ -68208,29 +68453,59 @@ static void statusBarTapCb(lv_event_t* e) {
+@@ -68226,29 +68500,59 @@ static void statusBarTapCb(lv_event_t* e) {
    if (s_cc_root) closeControlCenter(); else openControlCenter();
  }
  
@@ -612,7 +693,7 @@ index 1f84c418..56416df7 100644
      lv_area_t ba;
      lv_obj_get_coords(g_statusbar.root, &ba);
      if (pt.y < ba.y1 + STATUSBAR_H) return;   // the top row keeps the bar's usual tap
-@@ -68598,7 +68873,12 @@ static void buildGlobalStatusBar() {
+@@ -68616,7 +68920,12 @@ static void buildGlobalStatusBar() {
    // keypad users open the control center via the dedicated key.)
    lv_obj_add_flag(g_statusbar.root, NAV_SKIP_FLAG);
    lv_obj_add_event_cb(g_statusbar.root, statusBarTapCb, LV_EVENT_CLICKED, nullptr);
@@ -626,7 +707,30 @@ index 1f84c418..56416df7 100644
    // Hold the bar for 3 s to drop a screenshot to the SD card.
    lv_obj_add_event_cb(g_statusbar.root, statusBarHoldCb, LV_EVENT_PRESSED,    nullptr);
    lv_obj_add_event_cb(g_statusbar.root, statusBarHoldCb, LV_EVENT_PRESSING,   nullptr);
-@@ -96826,3 +97106,17 @@ static void docAuditFocus() {
+@@ -75833,7 +76142,10 @@ static void refreshStatusLabels() {
+       readerStart(pending_url);
+     } else {
+       if (s_reader_status) lv_label_set_text(s_reader_status, s_reader_msg);
+-      if (!s_reader_busy) {                 // the fetch finished
++      if (s_reader_busy) {
++        // Keep the body in sync with Connecting / Downloading / redirect stages.
++        readerShowLoading();
++      } else if (!s_reader_busy) {          // the fetch finished
+         if (s_reader_ok) {                  // …with a page
+           readerRenderBody();
+           readerSetAddrExpanded(false);     // collapse the address bar -> fullscreen reading
+@@ -94681,8 +94993,8 @@ void UITask::loop() {
+           char drv[3] = { (char)('0' + pdrv), ':', 0 };
+           void* work = malloc(4096);                       // f_mkfs scratch (>= FF_MAX_SS)
+           if (work) {
+-            if (f_mkfs(drv, MC_FM_FAT32, 0, work, 4096) == 0 /*FR_OK*/) {
+-              sdWriteFatLabel(pdrv, "MESHCOMOD");
++            if (f_mkfs(drv, s_sd_format_opt, 0, work, 4096) == 0 /*FR_OK*/) {
++              if (s_sd_format_opt == MC_FM_FAT32) sdWriteFatLabel(pdrv, "MESHCOMOD");
+               mkfs_ok = true;
+               ok = true;
+             }
+@@ -96845,3 +97157,17 @@ static void docAuditFocus() {
  }
  #endif
  #endif  // DOC_CAPTURE
@@ -662,26 +766,3 @@ index 67241b5c..1fa50290 100644
    #define CAP_LOCK_SCREEN  1
  
  #elif defined(HAS_RAK_TAP_V2)         // ===== RAK WisMesh Tap V2 (ESP32-S3) =====
-diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
---- a/src/ui-touch/UITask.cpp
-+++ b/src/ui-touch/UITask.cpp
-@@ -3231,6 +3231,8 @@ volatile bool g_usb_files_owns_serial = false;
- static volatile uint32_t g_sd_io_ms = 0;
- static inline void markSdIo() { const uint32_t t = millis(); g_sd_io_ms = t ? t : 1; }
-+// Firmware helpers outside this TU (http_download.cpp) light the same LED.
-+extern "C" void meshcomodMarkSdIo(void) { markSdIo(); }
- 
- // Async mesh-request activity: a small spinner glyph in the status bar while a
- // request is sending or awaiting a reply. markMeshRequest() stamps a send; the
- // indicator also stays lit while a UI reply is pending (s_ui_ping_deadline_ms,
-diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
---- a/src/ui-touch/UITask.cpp
-+++ b/src/ui-touch/UITask.cpp
-@@ -34263,6 +34263,6 @@
- static TaskHandle_t  s_reader_task    = nullptr;
- static bool          s_reader_pristine = false;    // URL field still holds the untouched default
--static const size_t  kReaderRawCap  = 192 * 1024;  // max raw HTML we buffer (PSRAM)
-+static const size_t  kReaderRawCap  = 512 * 1024;  // max raw HTML we buffer (PSRAM); matches kReaderHtmlCap
- static const size_t  kReaderTextCap =  60 * 1024;  // max extracted text we keep
- // Links found on the page: byte range in s_reader_text + resolved absolute href.
- using ReaderLink = ReaderContent::Link;

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// The browser engine exposed as a function, so wadamesh's built-in Web page
-// (the Reader page, which owns the address bar, history and the back bar) can
-// render a fetched page in place of its text-only view. One web app, one fetch
-// path, our renderer doing the layout.
+// Optional Lexbor embed API for hosts that already own fetch/chrome. The
+// drawer Browser app (BrowserApp) uses its own fetch + render path; wadamesh's
+// Web/Reader tile stays on the upstream text-extraction path and does not call
+// these helpers.
 #pragma once
 
 #include <lvgl.h>
@@ -17,9 +17,8 @@ bool browserRenderInto(lv_obj_t* parent, const char* url, const char* html, size
                        void (*on_link)(const char*));
 
 // Why the last browserRenderInto() call fell back ("ok" on success): "parse",
-// "core init", "no body", … so the Reader can say it instead of guessing.
+// "core init", "no body", …
 const char* browserLastRenderError();
 
-// The Reader's CJK-capable fonts, so laid-out pages keep the same glyph coverage
-// as the text view instead of falling back to Montserrat.
+// CJK-capable faces shared with the rest of the UI (implemented in UITask.cpp).
 const lv_font_t* readerWebFont(int px, bool bold);

@@ -1,0 +1,13 @@
+--- a/tactilebrowser_core/src/layout_engine.cpp	2026-11-19 16:20:55
++++ b/tactilebrowser_core/src/layout_engine.cpp	2026-11-19 16:20:55
+@@ -19,8 +19,8 @@
+     .y = 0,
+     .is_block = true,
+     .is_inline_block = false,
+-    .color = 0xFFFFFF,
+-    .bg_color = 0x000000,
++    .color = 0x1A1A1A,   // dark ink on the light paper canvas (T-Deck / Reader)
++    .bg_color = 0xFFFFFF,
+     .has_explicit_color = false,
+     .has_explicit_bg_color = false,
+     .background = {.type = BACKGROUND_FILL_NONE},

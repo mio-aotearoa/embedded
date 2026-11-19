@@ -33,14 +33,32 @@ def patched_source(project, relative):
 class Variants(unittest.TestCase):
     def test_isolated_config_and_common_defaults(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(build, "run") as run:
-            for name in build.VARIANTS:
+            # build.py resolves build_dir; on macOS /var/folders → /private/var/folders.
+            out_root = Path(tmp).resolve()
+            for name in build.IDF_VARIANTS:
                 build.build_variant(name, tmp)
             commands = [call.args[0] for call in run.call_args_list]
-            for name, cmd in zip(build.VARIANTS, commands):
-                self.assertIn(f"SDKCONFIG={tmp}/e1002-{name}/sdkconfig", cmd)
+            for name, cmd in zip(build.IDF_VARIANTS, commands):
+                self.assertIn(f"SDKCONFIG={out_root}/e1002-{name}/sdkconfig", cmd)
                 defaults = next(v for v in cmd if str(v).startswith("SDKCONFIG_DEFAULTS="))
                 self.assertIn("sdkconfig.airdrop;", defaults)
-                self.assertTrue(defaults.endswith(build.VARIANTS[name]))
+                self.assertTrue(defaults.endswith(build.IDF_VARIANTS[name]))
+
+    def test_open_cargo_command_targets_foa_tree(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cmd = build.open_cargo_cmd(tmp)
+            self.assertEqual(cmd[0], "cargo")
+            self.assertIn("--release", cmd)
+            self.assertIn("esp32", cmd)
+            self.assertIn(build.OPEN_TARGET, cmd)
+            out = Path(tmp).resolve() / "e1002-open" / "cargo-target"
+            self.assertIn(str(out), cmd)
+            self.assertTrue((build.OPEN_DIR / "Cargo.toml").is_file())
+            self.assertTrue((build.OPEN_DIR / "src" / "main.rs").is_file())
+            main = (build.OPEN_DIR / "src" / "main.rs").read_text()
+            self.assertIn("foa_sta", main)
+            self.assertIn("foa_awdl", main)
+            self.assertIn("AWDL_CHANNEL", main)
 
     def test_radio_ownership_and_channel_guard(self):
         source = patched_source("ESP32Drop", "ESP32Drop/src/awdl/port/awdl_port_esp32.cpp")

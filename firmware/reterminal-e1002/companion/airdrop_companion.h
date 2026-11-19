@@ -1,9 +1,10 @@
 /*
  * E1002 <-> AirDrop companion link.
  *
- * The E1002 has one 2.4 GHz radio and ESP32Drop needs it exclusively for AWDL.
- * The long-term answer is a second radio (an ESP32-C6/H2 running ESP32Drop)
- * that owns AWDL, while the E1002 keeps its normal Wi-Fi station link.
+ * The E1002 has one 2.4 GHz radio. The `coex` firmware tries same-radio
+ * dual-protocol receive on channel 6 (STA Wi-Fi + AWDL). For true concurrent
+ * use without that experiment, use a second radio (ESP32-C6/H2 + ESP32Drop)
+ * that owns AWDL while the E1002 keeps its normal Wi-Fi station link.
  *
  * This module is the E1002 half of that split: a small, transport-agnostic
  * frame codec. The caller feeds it bytes from UART/SPI and receives session

@@ -2,31 +2,26 @@
 
 What is actually available for this board, what each candidate would cost to
 bring in, and which one is worth attempting. This is a survey plus a
-recommendation. The winner (TactileBrowser's `tactilebrowser_core`) is now
-compiled in, and the firmware's own **Web** page renders fetched pages with it;
-the survey below is kept as the reasoning behind that choice.
+recommendation. The winner (TactileBrowser's `tactilebrowser_core`) is compiled
+in behind **Apps → Browser**; **Web** stays on the upstream Reader text path.
+The survey below is kept as the reasoning behind that engine choice.
 
 ## What the firmware has today
 
-wadamesh ships the Reader page: it does an HTTP(S) GET, follows redirects, and
-keeps the firmware's own scrolling, keyboard/trackball navigation and back bar
-(`openReaderPage()` in `UITask.cpp`). Fetched pages, and local `.htm`/`.html`
-files such as the Kiwix article, are laid out by our Lexbor renderer (below); the
-Reader's text pass is the fallback. Its HTTPS path uses `setInsecure()` with no
-certificate store.
+wadamesh ships the Reader page (**Web** tile): it does an HTTP(S) GET, follows
+redirects, and keeps the firmware's own scrolling, keyboard/trackball navigation
+and back bar (`openReaderPage()` in `UITask.cpp`). Markup becomes text via
+`ReaderContent::htmlToText` (`src/ui-touch/ReaderContent.cpp`): one tag-stripping
+pass that skips the body of every `<script>` and `<style>` element, drops all
+other tags, decodes entities, and keeps block/line boundaries plus `<a href>`
+targets. Its HTTPS path uses `setInsecure()` with no certificate store.
 
-**Can the Reader do CSS or JS? Yes — since the merge, the renderer does layout and
-inline scripts; the text pass is only the fallback.** Fetched pages and local HTML
-up to 512 KB go to our Lexbor renderer first. A page it cannot lay out, or a
-document bigger than that buffer, falls back to `ReaderContent::htmlToText`
-(`src/ui-touch/ReaderContent.cpp`): one tag-stripping pass that skips the body of
-every `<script>` and `<style>` element, drops all other tags, decodes entities,
-and keeps block/line boundaries plus `<a href>` targets. Nothing computes a
-style, lays out a box, or executes code — so a fallback page arrives as plain
-text with link targets, regardless of what its CSS says.
+**Apps → Browser** is the separate Lexbor app (`firmware/tdeck-plus/browser/`):
+fetch, Duktape for inline scripts, then CSS/box layout on a white paper canvas.
+That is the path that can do CSS/JS; the Reader does not.
 
-That is the baseline any browser engine has to beat, and it costs 0 bytes of
-new flash.
+The Reader text path is the baseline any browser engine has to beat, and it costs
+0 bytes of new flash.
 
 ## Constraints that decide the answer
 
@@ -172,9 +167,8 @@ DOM milestone the current page still lacks.
 
 ## What was chosen
 
-1. **The Reader is "the browser"**, with TactileBrowser's core merged into it:
-   fetched pages and local `.htm`/`.html` files up to 512 KB are laid out with
-   Lexbor; the text pass is the fallback. One Web tile, one fetch path.
+1. **Web = upstream Reader (text); Browser = Lexbor app.** Two drawer tiles:
+   Web keeps fetch + `htmlToText`; Browser owns TactileBrowser layout.
 2. **TactileBrowser's core was extracted, not the project.** Its
    `RenderInterface` needed only an LVGL 8.3 renderer, an HTTP(S) fetcher and a
    Duktape bridge (2.7.0, ES5.1, `document.write`/`console.log`), so neither
@@ -184,8 +178,8 @@ DOM milestone the current page still lacks.
    a less mature renderer than the one now shipped.
 4. **Agave was the most capable and the least practical:** full CSS3 and QuickJS
    need libcurl, FreeType and SQLite, and it has no MCU port.
-5. babe32's text-subset approach stays the reference for what a *fallback* text
-   pass should keep; the shipped page outgrew it.
+5. babe32's text-subset approach stays the reference for what the Reader text
+   path should keep.
 
 ## Verification status
 

@@ -1,3 +1,5 @@
-# Experimental same-channel station + AWDL; common settings come first.
+# ch6 2.4 GHz dual-protocol receive: Wi-Fi STA + AWDL on the same radio.
+# Common AirDrop settings come from sdkconfig.airdrop first.
 CONFIG_AIRDROP_COEX=y
+# SoftAP interface is required for ESP32Drop's APSTA attach on channel 6.
 CONFIG_ESP_WIFI_SOFTAP_SUPPORT=y

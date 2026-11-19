@@ -237,12 +237,13 @@ index 16c1662..41bff35 100644
  #include <Arduino.h>          /* millis(); the .ino got this via M5Unified for free */
  #include <string.h>
  #include <stdio.h>
-@@ -2081,6 +2082,23 @@ static esp_err_t wifi_probe_init(void) {
+@@ -2081,6 +2082,24 @@ static esp_err_t wifi_probe_init(void) {
    ignore_state(nvs_flash_init());
    ignore_state(esp_netif_init());
    ignore_state(esp_event_loop_create_default());
 +#if CONFIG_AIRDROP_COEX
-+  // Borrow photoframe's running STA driver; never initialise or stop it here.
++  // ch6 dual-protocol: borrow the live STA driver (already on PROBE_CHANNEL).
++  // SoftAP must share the STA channel; never init/stop Wi-Fi here.
 +  wifi_mode_t mode;
 +  wifi_ap_record_t sta;
 +  if ((e = esp_wifi_get_mode(&mode)) != ESP_OK) return e;

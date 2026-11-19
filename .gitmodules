@@ -19,3 +19,6 @@
 [submodule "third_party/TactileBrowser"]
 	path = third_party/TactileBrowser
 	url = https://github.com/NellowTCS/TactileBrowser
+[submodule "third_party/esp32-ai"]
+	path = third_party/esp32-ai
+	url = https://github.com/slvDev/esp32-ai.git

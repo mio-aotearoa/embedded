@@ -19,7 +19,9 @@ firmware/tdeck-plus/
     zim_reader.{h,cpp}  ZIM v5/v6 parser (uncompressed + zstd clusters)
     kiwix_app.{h,cpp}   app page: archive list -> title search -> Reader
   esp32ai/
-    esp32ai_app.{h,cpp} model assets on the card, downloaded over Wi-Fi
+    esp32ai_app.{h,cpp}  download UI + chat once the model is on the card
+    llm_port.{h,cpp}     SD-backed slvDev/esp32-ai TinyStories runtime
+    generated/           vocab.h + tokenizer_encoder.h (scripts/esp32ai-headers.sh)
   common/
     http_download.{h,cpp}  one HTTP(S) -> SD transfer, on its own task
   test/host/            host test for the parser (no ESP32 needed)
@@ -45,12 +47,11 @@ wadamesh Reader (openReaderPage)  <- existing firmware screen
 SD card
 ```
 
-The Reader is wadamesh's own on-device browser — the drawer's only **Web**
-tile. It opens local HTML from the card (`sd:/...`) and fetched pages, and the
-latter are laid out by our Lexbor renderer (`firmware/tdeck-plus/browser/`), so
-there is still only one web app. The app writes the article out and the firmware
-displays it exactly like any other local page. ZIM-internal links are turned into plain text because the Reader
-would resolve them against the card and miss; following links inside an
+The Reader (**Web** tile) is wadamesh's upstream text browser: HTTP(S) or local
+HTML stripped to readable text with link targets. **Apps → Browser** is the
+separate Lexbor HTML/CSS app (`firmware/tdeck-plus/browser/`). Kiwix still opens
+articles in the Reader. ZIM-internal links are turned into plain text because the
+Reader would resolve them against the card and miss; following links inside an
 archive is not implemented.
 
 ## Build
@@ -90,12 +91,11 @@ applied automatically; `./scripts/patches.sh status wadamesh` shows it.
 
 ## Limitations
 
-* Text/HTML articles only. Articles up to 128 KB are laid out by the Lexbor
-  renderer — the same one fetched pages use — so headings, colours and the CSS
-  subset apply; larger articles fall back to the Reader's text pass, which drops
-  images, CSS and tables. The renderer does not decode images at all (the first
-  image is shown separately before the article). Full-text (Xapian) search is not
-  used — search is the ZIM title index, so it matches title prefixes only.
+* Text/HTML articles only. Kiwix opens them in the Reader's text pass (no CSS or
+  tables). Use **Apps → Browser** for Lexbor layout of fetched pages. The first
+  ZIM image is still shown separately before the article. Full-text (Xapian)
+  search is not used — search is the ZIM title index, so it matches title
+  prefixes only.
 * LZMA2/XZ clusters (pre-libzim-8 archives) are rejected with a message; those
   archives need re-exporting with zstd.
 * Articles larger than 220 KB are refused rather than truncated.

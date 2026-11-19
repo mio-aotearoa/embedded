@@ -11,7 +11,7 @@ index f0007ad..ff046ae 100644
      board_hal
      espressif__qrcode
 diff --git a/main/http_server.c b/main/http_server.c
-index c808df7..3d29ed1 100644
+index c808df7..710dae9 100644
 --- a/main/http_server.c
 +++ b/main/http_server.c
 @@ -1,4 +1,5 @@
@@ -20,26 +20,28 @@ index c808df7..3d29ed1 100644
  
  #include <dirent.h>
  #include <errno.h>
-@@ -195,6 +196,17 @@ static esp_err_t auth_gate(httpd_req_t *req)
+@@ -195,6 +196,19 @@ static esp_err_t auth_gate(httpd_req_t *req)
          httpd_resp_sendstr(req, "{\"error\":\"authentication required\"}");
          return ESP_OK;
      }
 +#if CONFIG_AIRDROP_COEX
-+    // Keep browsing/status available while AWDL owns the receive buffers. Do
-+    // not allow an upload, reset, OTA or sleep request to interrupt the window.
++    // During the ch6 dual-protocol window, GETs (and keep_alive) prove ordinary
++    // Wi-Fi still works while AWDL may receive AirDrop. Block mutations that
++    // would tear down the radio mid-experiment.
 +    if (airdrop_bridge_is_active() && req->method != HTTP_GET &&
 +        strcmp(req->uri, "/api/keep_alive") != 0) {
 +        httpd_resp_set_status(req, "503 Service Unavailable");
 +        httpd_resp_set_hdr(req, "Retry-After", "5");
 +        httpd_resp_set_type(req, "application/json");
-+        return httpd_resp_sendstr(req, "{\"error\":\"AirDrop receive window active; try again shortly\"}");
++        return httpd_resp_sendstr(req,
++            "{\"error\":\"ch6 dual-protocol receive active; try again shortly\"}");
 +    }
 +#endif
      return ((http_handler_fn) req->user_ctx)(req);
  }
  
 diff --git a/main/main.c b/main/main.c
-index de79471..729085e 100644
+index de79471..725669a 100644
 --- a/main/main.c
 +++ b/main/main.c
 @@ -5,6 +5,8 @@
@@ -64,7 +66,7 @@ index de79471..729085e 100644
  
  static const char *TAG = "main";
 +#if CONFIG_AIRDROP_COEX
-+// Survives a software reset so failed experimental startup cannot boot-loop.
++// Survives a software reset so a failed dual-protocol teardown cannot boot-loop.
 +static RTC_NOINIT_ATTR uint32_t s_airdrop_recovery;
 +#define AIRDROP_RECOVERY_MAGIC 0xAD1002CEu
 +#endif
@@ -102,7 +104,7 @@ index de79471..729085e 100644
      ESP_ERROR_CHECK(wifi_manager_init());
      ESP_ERROR_CHECK(wifi_provisioning_init());
  
-@@ -783,11 +815,47 @@ void app_main(void)
+@@ -783,11 +815,54 @@ void app_main(void)
          }
      }
  
@@ -114,17 +116,21 @@ index de79471..729085e 100644
      http_server_set_ready();
  
 +#if CONFIG_AIRDROP_COEX
-+    // HTTP stays available while the main task pumps AirDrop. Defer scheduled
-+    // downloads and button-driven display work until this bounded experiment ends.
++    // ch6 dual-protocol experiment: STA already carries ordinary Wi-Fi; attach
++    // AWDL on the same channel and keep HTTP GETs available as the Wi-Fi probe.
++    // Defer buttons/downloads until the bounded window ends.
 +    wifi_ap_record_t coex_ap;
 +    if (s_airdrop_recovery == AIRDROP_RECOVERY_MAGIC) {
 +        s_airdrop_recovery = 0;
-+        ESP_LOGW(TAG, "Skipping AirDrop once after interrupted coex window; WiFi continues");
++        ESP_LOGW(TAG, "Skipping dual-protocol window once after incomplete cleanup; Wi-Fi continues");
 +    } else if (wifi_err == ESP_OK && esp_wifi_sta_get_ap_info(&coex_ap) == ESP_OK &&
-+        coex_ap.primary == 6) {
++        coex_ap.primary == AIRDROP_COEX_CHANNEL) {
 +        char path[160] = {0};
 +        s_airdrop_recovery = AIRDROP_RECOVERY_MAGIC;
 +        power_manager_reset_sleep_timer();
++        ESP_LOGI(TAG,
++                 "Starting ch%d dual-protocol receive (Wi-Fi STA + AWDL/AirDrop)",
++                 AIRDROP_COEX_CHANNEL);
 +        esp_err_t err = airdrop_bridge_receive_to_file(
 +            path, sizeof(path), AIRDROP_BRIDGE_WINDOW_MS);
 +        if (err == ESP_OK) {
@@ -134,7 +140,8 @@ index de79471..729085e 100644
 +                display_flow_retire_source(path, format, false);
 +            }
 +        } else {
-+            ESP_LOGW(TAG, "Experimental AirDrop window ended: %s", esp_err_to_name(err));
++            ESP_LOGW(TAG, "ch%d dual-protocol window ended: %s",
++                     AIRDROP_COEX_CHANNEL, esp_err_to_name(err));
 +        }
 +        if (airdrop_bridge_is_active()) {
 +            ESP_LOGW(TAG, "AWDL cleanup incomplete; rebooting to release the radio safely");
@@ -144,7 +151,9 @@ index de79471..729085e 100644
 +        if (!wifi_manager_is_connected()) wifi_err = ESP_ERR_TIMEOUT;
 +        power_manager_reset_sleep_timer();
 +    } else {
-+        ESP_LOGW(TAG, "Concurrent AirDrop requires a connected channel-6 router; WiFi continues");
++        ESP_LOGW(TAG,
++                 "Dual-protocol receive needs a 2.4 GHz router on channel %d; Wi-Fi continues",
++                 AIRDROP_COEX_CHANNEL);
 +    }
 +    xTaskCreate(button_task, "button_task", 8192, NULL, 5, NULL);
 +#endif

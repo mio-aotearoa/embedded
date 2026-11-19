@@ -5,7 +5,7 @@ Two ESP32-S3 firmwares, built almost entirely out of pinned upstream projects:
 | Firmware | Hardware | What runs | Upstream code |
 |---|---|---|---|
 | [`firmware/tdeck-plus`](firmware/tdeck-plus) | LilyGO T-Deck Plus | wadamesh (MeshCore mesh stack + LVGL touch UI) with a Kiwix ZIM reader from SD | `jade-on-mesh/wadamesh-tak` (which pins its MeshCore fork), `facebook/zstd` |
-| [`firmware/reterminal-e1002`](firmware/reterminal-e1002) | Seeed reTerminal E1002 | esp32-photoframe + AirDrop receive (ESP32Drop) | `aitjcize/esp32-photoframe`, `s-iwaki-d/ESP32Drop` |
+| [`firmware/reterminal-e1002`](firmware/reterminal-e1002) | Seeed reTerminal E1002 | photoframe + AirDrop (`switch`/`coex`) and FoA open concurrent radio | `aitjcize/esp32-photoframe`, `s-iwaki-d/ESP32Drop`, `esp32-open-mac/FoA` |
 
 Both devices are ESP32-S3 boards with PSRAM, which is what the upstream
 projects need.
@@ -52,10 +52,9 @@ Wi-Fi (a shared `common/http_download.cpp` task writes to `<name>.part` and
 renames only after the last byte), and the `ESP-AI` page fetches the
 slvDev/esp32-ai `model.bin` and `tokenizer.json` into
 `/esp32ai/tinystories/` when they are missing, checking the pinned byte sizes.
-The LLM itself is not generated on the device yet: upstream's runtime reads its
-weights from a flash mapping, and the 14.9 MB model does not fit this board's
-flash layout, so the page manages the assets and says that generation needs the
-runtime port.
+Once both files are complete it opens a chat UI and runs the real TinyStories
+runtime from `third_party/esp32-ai` (`llm.h`), with weights staged from the SD
+card into PSRAM instead of a flash-mapped `model` partition.
 
 The `Elements` page is the periodic table from
 [El-EnderJ/NeoCalculator](https://github.com/El-EnderJ/NeoCalculator)
@@ -100,12 +99,11 @@ is portable and `scripts/pinyin-dict.sh` builds the 1 MB dictionary for
 `/sd/ime/dict_pinyin.dat`. The remaining work — an LVGL 8 candidate UI and CJK
 glyphs — is tracked in [`docs/cjk-rendering.md`](docs/cjk-rendering.md).
 
-**reTerminal E1002** — esp32-photoframe owns storage, image processing and
-sleep. The AirDrop bridge supplies two builds: `switch` chooses exclusive
-Wi-Fi or AirDrop at boot; `coex` attempts a bounded AirDrop window alongside
-a connected channel-6 Wi-Fi station and HTTP server. ESP32Drop is built behind
-a small Arduino shim with local radio-ownership and listener-shutdown patches.
-The concurrent build needs hardware validation.
+**reTerminal E1002** — three firmwares: `switch` (exclusive Wi‑Fi or AirDrop),
+`coex` (Espressif APSTA ch6 dual-protocol RX experiment), and `open` (FoA
+`foa_sta` + `foa_awdl` concurrent open MAC, classic ESP32 lab/companion until
+S3). ESP32Drop sits behind a small Arduino shim with local radio-ownership
+patches. See [`firmware/reterminal-e1002/README.md`](firmware/reterminal-e1002/README.md).
 
 See [`docs/architecture.md`](docs/architecture.md) for the details, the
 constraints behind each choice, and the known gaps.
@@ -169,20 +167,23 @@ toolchain (PlatformIO/espressif32 6.11.0) produces
 `third_party/out/LilyGo_TDeck_companion_radio_touch.bin` (3,859,664 bytes),
 with `KiwixApp::launch`, `Esp32AiApp::launch`, `ZimArchive::searchTitles` and
 `httpDownloadStart` linked in. It has **not been flashed or run on hardware**.
-**Both E1002 variants compile and link** with ESP-IDF 6.0.3 / GCC 15.3.0.
+**E1002 `switch`/`coex` compile and link** with ESP-IDF 6.0.3 / GCC 15.3.0.
 Merged first-flash images are in `build/e1002-{switch,coex}/firmware.bin`.
-AirDrop/Wi-Fi operation has not been verified on hardware.
+The FoA open image is in `build/e1002-open/`. AirDrop/Wi‑Fi operation has not
+been verified on hardware.
 
 ## Licensing
 
 * wadamesh and its MeshCore fork — GPL-3.0
 * esp32-photoframe — GPL-3.0
 * ESP32Drop — 0BSD
+* FoA (open firmware) — MIT OR Apache-2.0
 * zstd — BSD-3-Clause / GPL-2.0 dual
 
-The combined firmwares are therefore GPL-3.0. ESP32Drop's 0BSD terms are
-compatible. `third_party/*` keeps each project's own LICENSE file; this
-repository's own code is GPL-3.0 (see `LICENSE`).
+The combined IDF firmwares are therefore GPL-3.0. ESP32Drop's 0BSD terms are
+compatible. The FoA `open` image is MIT/Apache and stays a separate binary.
+`third_party/*` keeps each project's own LICENSE file; this repository's own
+code is GPL-3.0 (see `LICENSE`).
 
 ## Building the reTerminal E1002 firmware
 
@@ -193,7 +194,7 @@ esptool for asset generation and flashing:
 ```bash
 nix develop -c bash -lc '. "$IDF_PATH/export.sh" && firmware/reterminal-e1002/build.sh'
 # or, with IDF already on PATH:
-firmware/reterminal-e1002/build.sh   # builds switch and coex
+firmware/reterminal-e1002/build.sh   # builds switch, coex, and open
 ```
 
 See [build and flash instructions](firmware/reterminal-e1002/README.md) for

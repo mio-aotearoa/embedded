@@ -1,0 +1,13 @@
+[target.'cfg(any(target_arch = "xtensa", target_arch = "riscv"))']
+runner = "espflash flash --monitor -S"
+
+[build]
+target = "xtensa-esp32-none-elf"
+
+[env]
+# Optional: set SSID / PASSWORD when linking a real STA for lab tests.
+# SSID = "your-ch6-ap"
+# PASSWORD = "secret"
+
+[unstable]
+build-std = ["core", "alloc"]

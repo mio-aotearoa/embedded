@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Model assets for slvDev/esp32-ai on the SD card.
-//
-// Upstream pins these two files and their byte sizes (scripts/fetch_model.sh);
-// the sizes are repeated here so a truncated download is refused instead of
-// being reported as a ready model. The URLs are the release's Hugging Face
-// resolve endpoints.
+// Model assets for slvDev/esp32-ai on the SD card, plus a chat UI that runs the
+// real TinyStories runtime once both files are present at the pinned sizes.
 #include "esp32ai_app.h"
 
 #include "AppPage.h"
 #include "http_download.h"
 #include "i18n.h"
+#include "llm_port.h"
 
 #include <Arduino.h>
 #include <SD.h>
 #include <WiFi.h>
+#include <esp_heap_caps.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <lvgl.h>
 
 #include <stdio.h>
@@ -24,7 +24,6 @@ namespace
 {
 constexpr uint32_t kBg = 0x101418;
 // SD.open/mkdir paths are relative to the card root (same as Download/Kiwix).
-// Do not prefix /sd — that VFS mount is only for stdio/fopen callers.
 constexpr const char *kDir = "/esp32ai/tinystories";
 
 struct ModelFile
@@ -34,7 +33,6 @@ struct ModelFile
     const char *url;
 };
 
-// Sizes from slvDev/esp32-ai scripts/fetch_model.sh (tinystories pins).
 const ModelFile kFiles[] = {
     {"model.bin", 14912348u,
      "https://huggingface.co/slvDev/esp32-ai-tinystories/resolve/main/model.bin"},
@@ -64,18 +62,13 @@ bool fileSize(const char *path, uint64_t &size)
 void humanSize(uint64_t bytes, char *out, size_t cap)
 {
     if (bytes >= 1024ull * 1024ull)
-    {
         snprintf(out, cap, "%.1f MB", (double)bytes / (1024.0 * 1024.0));
-    }
     else if (bytes >= 1024ull)
-    {
         snprintf(out, cap, "%.0f KB", (double)bytes / 1024.0);
-    }
     else
-    {
         snprintf(out, cap, "%u B", (unsigned)bytes);
-    }
 }
+
 }  // namespace
 
 Esp32AiApp *Esp32AiApp::s_active = nullptr;
@@ -119,7 +112,6 @@ bool Esp32AiApp::open(void)
     snprintf(barTitle_, sizeof barTitle_, "%s", TR("ESP-AI"));
     appPageBegin(barTitle_, &Esp32AiApp::dismiss);
 
-    // The tall "< ESP-AI" bar overlaps the top of the root; start below it.
     const lv_coord_t bar = appPageBarCover();
 
     list_ = lv_list_create(root_);
@@ -146,12 +138,37 @@ void Esp32AiApp::close(void)
         lv_timer_del(timer_);
         timer_ = nullptr;
     }
+    appPageBindTextField(nullptr);
+    if (genHandle_)
+    {
+        vTaskDelete(genHandle_);
+        genHandle_ = nullptr;
+        // Idle task must reclaim the static TCB before the buffers are freed.
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    esp32aiUnload();
+    if (genStack_)
+    {
+        heap_caps_free(genStack_);
+        genStack_ = nullptr;
+        genStackBytes_ = 0;
+    }
+    if (genTcb_)
+    {
+        heap_caps_free(genTcb_);
+        genTcb_ = nullptr;
+    }
     appPageEnd(&Esp32AiApp::dismiss);
     appPageDeleteRootAsync(root_);
     root_ = nullptr;
     list_ = nullptr;
+    chat_ = nullptr;
     status_ = nullptr;
+    ta_ = nullptr;
+    sendBtn_ = nullptr;
+    streamBody_ = nullptr;
     pending_ = -1;
+    chatMode_ = false;
 }
 
 void Esp32AiApp::setStatus(const char *msg)
@@ -159,10 +176,97 @@ void Esp32AiApp::setStatus(const char *msg)
     if (status_) lv_label_set_text(status_, msg ? msg : "");
 }
 
-void Esp32AiApp::refresh(void)
+void Esp32AiApp::ensureChatPane(void)
 {
-    if (!list_) return;
-    lv_obj_clean(list_);
+    if (list_) lv_obj_add_flag(list_, LV_OBJ_FLAG_HIDDEN);
+    if (chat_) return;
+
+    const lv_coord_t w = lv_disp_get_hor_res(nullptr);
+    const lv_coord_t h = appPageContentH();
+    const lv_coord_t bar = appPageBarCover();
+    chat_ = lv_obj_create(root_);
+    lv_obj_set_pos(chat_, 0, bar + 4);
+    lv_obj_set_size(chat_, w, h - bar - 78);
+    lv_obj_set_style_bg_opa(chat_, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(chat_, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(chat_, 6, LV_PART_MAIN);
+    lv_obj_set_style_pad_row(chat_, 8, LV_PART_MAIN);
+    lv_obj_set_flex_flow(chat_, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(chat_, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_scroll_dir(chat_, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(chat_, LV_SCROLLBAR_MODE_AUTO);
+}
+
+lv_obj_t *Esp32AiApp::addChatMessage(const char *who, const char *text, bool streaming)
+{
+    ensureChatPane();
+    if (!chat_) return nullptr;
+
+    const lv_coord_t inner = lv_obj_get_content_width(chat_);
+    lv_obj_t *block = lv_obj_create(chat_);
+    lv_obj_set_width(block, inner > 0 ? inner : (lv_disp_get_hor_res(nullptr) - 12));
+    lv_obj_set_height(block, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(block, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(block, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(block, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_row(block, 2, LV_PART_MAIN);
+    lv_obj_set_flex_flow(block, LV_FLEX_FLOW_COLUMN);
+    lv_obj_clear_flag(block, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *whoLab = lv_label_create(block);
+    lv_label_set_text(whoLab, who && who[0] ? who : "?");
+    lv_obj_set_style_text_color(whoLab, lv_color_hex(0x7A8794), LV_PART_MAIN);
+
+    lv_obj_t *body = lv_label_create(block);
+    lv_obj_set_width(body, lv_pct(100));
+    lv_label_set_long_mode(body, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_color(body, lv_color_hex(0xE8EEF4), LV_PART_MAIN);
+    if (streaming && (!text || !text[0]))
+        lv_label_set_text(body, "\xE2\x80\xA6");
+    else
+        lv_label_set_text(body, text ? text : "");
+
+    lv_obj_scroll_to_view(block, LV_ANIM_OFF);
+    return body;
+}
+
+void Esp32AiApp::refreshAssistantRow(void)
+{
+    if (!streamBody_) return;
+    lv_label_set_text(streamBody_, genOut_[0] ? genOut_ : "\xE2\x80\xA6");
+    lv_obj_scroll_to_view(lv_obj_get_parent(streamBody_), LV_ANIM_OFF);
+}
+
+void Esp32AiApp::showDownload(void)
+{
+    chatMode_ = false;
+    streamBody_ = nullptr;
+    if (chat_)
+    {
+        lv_obj_add_flag(chat_, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (ta_)
+    {
+        appPageBindTextField(nullptr);
+        lv_obj_del(ta_);
+        ta_ = nullptr;
+    }
+    if (sendBtn_)
+    {
+        lv_obj_del(sendBtn_);
+        sendBtn_ = nullptr;
+    }
+
+    const lv_coord_t w = lv_disp_get_hor_res(nullptr);
+    const lv_coord_t h = appPageContentH();
+    const lv_coord_t bar = appPageBarCover();
+    if (list_)
+    {
+        lv_obj_clear_flag(list_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_pos(list_, 0, bar + 4);
+        lv_obj_set_size(list_, w, h - bar - 48);
+        lv_obj_clean(list_);
+    }
 
     for (int i = 0; i < kFileCount; i++)
     {
@@ -192,16 +296,108 @@ void Esp32AiApp::refresh(void)
     }
 
     char hint[256];
-    snprintf(hint, sizeof hint,
-             "%s %s%s",
+    snprintf(hint, sizeof hint, "%s %s%s",
              WiFi.status() == WL_CONNECTED ? TR("Wi-Fi connected.") : TR("Wi-Fi is not connected."),
              TR("Files live at "), kDir);
     setStatus(hint);
 }
 
+void Esp32AiApp::showChat(void)
+{
+    chatMode_ = true;
+    const lv_coord_t w = lv_disp_get_hor_res(nullptr);
+    const lv_coord_t h = appPageContentH();
+
+    ensureChatPane();
+    if (chat_)
+    {
+        lv_obj_clear_flag(chat_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clean(chat_);
+    }
+    streamBody_ = nullptr;
+
+    if (!ta_)
+    {
+        ta_ = lv_textarea_create(root_);
+        lv_obj_set_size(ta_, w - 88, 28);
+        lv_obj_set_pos(ta_, 4, h - 72);
+        lv_textarea_set_one_line(ta_, true);
+        lv_textarea_set_max_length(ta_, 200);
+        lv_textarea_set_placeholder_text(ta_, TR("Type a message"));
+        lv_obj_add_event_cb(ta_, taCb, LV_EVENT_ALL, nullptr);
+    }
+    if (!sendBtn_)
+    {
+        sendBtn_ = lv_btn_create(root_);
+        lv_obj_set_size(sendBtn_, 72, 28);
+        lv_obj_set_pos(sendBtn_, w - 80, h - 72);
+        lv_obj_add_event_cb(sendBtn_, sendCb, LV_EVENT_CLICKED, nullptr);
+        lv_obj_t *lab = lv_label_create(sendBtn_);
+        lv_label_set_text(lab, TR("Send"));
+        lv_obj_center(lab);
+    }
+
+    appPageBindTextField(ta_);
+    addChatMessage("ESP-AI", TR("Chat ready. Type a message (ASCII)."), false);
+    setStatus(TR("On-device TinyStories \xE2\x80\x94 replies stream live"));
+
+    // Reserve + spawn the worker before EnsureLoaded pulls activation scratch
+    // into internal SRAM — otherwise a dynamic xTaskCreate cannot find a block.
+    if (!genHandle_)
+    {
+        if (!genTcb_)
+        {
+            genTcb_ = (StaticTask_t *)heap_caps_malloc(sizeof(StaticTask_t),
+                                                       MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        }
+        if (!genStack_)
+        {
+            static const uint32_t kSizes[] = {12 * 1024, 10 * 1024, 8 * 1024};
+            for (uint32_t sz : kSizes)
+            {
+                genStack_ = (StackType_t *)heap_caps_malloc(sz, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+                if (genStack_)
+                {
+                    genStackBytes_ = sz;
+                    break;
+                }
+            }
+        }
+        if (!genTcb_ || !genStack_)
+        {
+            setStatus(TR("No RAM for generation task"));
+            return;
+        }
+        genHandle_ = xTaskCreateStaticPinnedToCore(
+            genTask, "esp32ai-gen", genStackBytes_ / sizeof(StackType_t), this, 2, genStack_,
+            genTcb_, 0);
+        if (!genHandle_)
+        {
+            setStatus(TR("Cannot start generation task"));
+            return;
+        }
+        Serial.printf("[esp32ai] gen task stack %u B (free_int=%u max=%u)\n",
+                      (unsigned)genStackBytes_, (unsigned)ESP.getFreeHeap(),
+                      (unsigned)ESP.getMaxAllocHeap());
+    }
+
+    char err[96];
+    if (!esp32aiEnsureLoaded(err, sizeof err))
+    {
+        setStatus(err[0] ? err : TR("Failed to load the model"));
+    }
+}
+
+void Esp32AiApp::refresh(void)
+{
+    if (!list_) return;
+    if (esp32aiModelReady()) showChat();
+    else showDownload();
+}
+
 void Esp32AiApp::rowCb(lv_event_t *e)
 {
-    if (!s_active) return;
+    if (!s_active || s_active->chatMode_) return;
     const int idx = (int)(uintptr_t)lv_event_get_user_data(e) - 1;
     if (idx < 0 || idx >= kFileCount) return;
 
@@ -248,13 +444,119 @@ void Esp32AiApp::beginDownload(int fileIndex)
     setStatus(msg);
 }
 
+void Esp32AiApp::taCb(lv_event_t *e)
+{
+    if (!s_active || !s_active->chatMode_) return;
+    if (lv_event_get_code(e) == LV_EVENT_READY) s_active->startGenerate();
+}
+
+void Esp32AiApp::sendCb(lv_event_t *e)
+{
+    (void)e;
+    if (s_active) s_active->startGenerate();
+}
+
+void Esp32AiApp::startGenerate(void)
+{
+    if (!chatMode_ || !ta_ || genBusy_) return;
+    const char *text = lv_textarea_get_text(ta_);
+    if (!text || !text[0])
+    {
+        setStatus(TR("Type a prompt first"));
+        return;
+    }
+    snprintf(prompt_, sizeof prompt_, "%s", text);
+    lv_textarea_set_text(ta_, "");
+    addChatMessage("You", prompt_, false);
+    setStatus(TR("Replying\xE2\x80\xA6"));
+    genBusy_ = true;
+    genDone_ = false;
+    genResult_ = 0;
+    genErr_[0] = 0;
+    genOut_[0] = 0;
+    genOutSeq_ = 0;
+    genOutShown_ = 0;
+    streamBody_ = addChatMessage("ESP-AI", "", true);
+    if (sendBtn_) lv_obj_add_state(sendBtn_, LV_STATE_DISABLED);
+    // Poll often so streamed tokens paint while the worker runs.
+    if (!timer_) timer_ = lv_timer_create(tickCb, 100, nullptr);
+    else lv_timer_set_period(timer_, 100);
+    if (!genHandle_)
+    {
+        genBusy_ = false;
+        setStatus(TR("Cannot start generation"));
+        if (sendBtn_) lv_obj_clear_state(sendBtn_, LV_STATE_DISABLED);
+        return;
+    }
+    xTaskNotifyGive(genHandle_);
+}
+
+void Esp32AiApp::onToken(const char *utf8, int len, void *user)
+{
+    (void)utf8;
+    (void)len;
+    Esp32AiApp *app = static_cast<Esp32AiApp *>(user);
+    if (app) app->genOutSeq_++;
+}
+
+void Esp32AiApp::genTask(void *arg)
+{
+    Esp32AiApp *app = static_cast<Esp32AiApp *>(arg);
+    for (;;)
+    {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        char err[96];
+        // 200 tokens matches upstream N_GENERATE; chat UI streams via onToken.
+        const int n = esp32aiGenerate(app->prompt_, app->genOut_, sizeof app->genOut_, 200,
+                                      onToken, app, err, sizeof err);
+        app->genResult_ = n;
+        if (n < 0) snprintf(app->genErr_, sizeof app->genErr_, "%s", err);
+        else app->genErr_[0] = 0;
+        app->genDone_ = true;
+        app->genBusy_ = false;
+    }
+}
+
 void Esp32AiApp::tickCb(lv_timer_t *t)
 {
     (void)t;
     Esp32AiApp *app = s_active;
     if (!app) return;
-    const HttpDownloadState &st = httpDownloadState();
 
+    if (app->chatMode_)
+    {
+        if (app->genBusy_ && app->genOutSeq_ != app->genOutShown_)
+        {
+            app->genOutShown_ = app->genOutSeq_;
+            app->refreshAssistantRow();
+        }
+        if (app->genDone_)
+        {
+            app->genDone_ = false;
+            if (app->sendBtn_) lv_obj_clear_state(app->sendBtn_, LV_STATE_DISABLED);
+            if (app->genResult_ < 0)
+            {
+                app->setStatus(app->genErr_[0] ? app->genErr_ : TR("Generation failed"));
+                if (app->streamBody_) lv_label_set_text(app->streamBody_, "(failed)");
+            }
+            else
+            {
+                app->refreshAssistantRow();
+                if (!app->genOut_[0] && app->streamBody_)
+                    lv_label_set_text(app->streamBody_, "(empty)");
+                app->setStatus(TR("Done"));
+            }
+            app->streamBody_ = nullptr;
+            if (!httpDownloadBusy() && app->timer_ && !app->genBusy_)
+            {
+                lv_timer_del(app->timer_);
+                app->timer_ = nullptr;
+            }
+        }
+        return;
+    }
+
+    const HttpDownloadState &st = httpDownloadState();
     if (st.running)
     {
         char msg[128];
@@ -266,7 +568,8 @@ void Esp32AiApp::tickCb(lv_timer_t *t)
         }
         else
         {
-            snprintf(msg, sizeof msg, "%s %u KB", TR("Downloading"), (unsigned)(st.bytes / 1024));
+            snprintf(msg, sizeof msg, "%s %u KB", TR("Downloading"),
+                     (unsigned)(st.bytes / 1024));
         }
         app->setStatus(msg);
         return;
@@ -291,9 +594,12 @@ void Esp32AiApp::tickCb(lv_timer_t *t)
     app->refresh();
     if (ok)
     {
-        char msg[128];
-        snprintf(msg, sizeof msg, TR("Saved %s to the card"), name);
-        app->setStatus(msg);
+        if (!app->chatMode_)
+        {
+            char msg[128];
+            snprintf(msg, sizeof msg, TR("Saved %s to the card"), name);
+            app->setStatus(msg);
+        }
     }
     else
     {

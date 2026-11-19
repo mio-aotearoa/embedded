@@ -16,3 +16,7 @@ third_party/out/
 
 # generated card assets (pinyin dictionary, etc.)
 out/
+
+# Python bytecode
+**/__pycache__/
+*.py[cod]

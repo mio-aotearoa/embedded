@@ -1,9 +1,9 @@
 // ESP32Drop receive window for esp32-photoframe.
 //
-// The optional coex build patches ESP32Drop radio ownership. Its port files are
-// compiled into this component (see CMakeLists.txt), with the local lifecycle
-// patch series applied and components/esp32drop_compat's
-// Arduino.h, which supplies millis()/delay()/Serial.
+// switch: exclusive radio (ESP32Drop upstream contract).
+// coex: ch6 2.4 GHz dual-protocol receive — STA stays up for ordinary Wi-Fi
+// frames while AWDL listens for AirDrop on the same channel (APSTA borrow via
+// patches/ESP32Drop). Port sources compile in here with esp32drop_compat.
 #include "airdrop_bridge.h"
 
 #include <atomic>
@@ -204,22 +204,43 @@ esp_err_t airdrop_bridge_receive_to_file(char *out_path, size_t out_path_cap, ui
         return ESP_FAIL;
     }
 
+#if CONFIG_AIRDROP_COEX
+    ESP_LOGI(TAG,
+             "ch%d dual-protocol receive: Wi-Fi STA + AWDL as \"%s\" for %u s "
+             "(HTTP GETs exercise Wi-Fi while AirDrop may arrive)",
+             AIRDROP_COEX_CHANNEL, AIRDROP_BRIDGE_NAME, (unsigned)(timeout_ms / 1000));
+#else
     ESP_LOGI(TAG, "listening as \"%s\" for %u s", AIRDROP_BRIDGE_NAME,
              (unsigned)(timeout_ms / 1000));
+#endif
 
     const TickType_t started_at = xTaskGetTickCount();
     uint32_t last_logged_bytes = 0;
+#if CONFIG_AIRDROP_COEX
+    TickType_t last_dual_log = started_at;
+#endif
     while (!s_ready && (TickType_t)(xTaskGetTickCount() - started_at) < pdMS_TO_TICKS(timeout_ms)) {
         // The only call ESP32Drop requires to be pumped; callbacks run on this
         // task, which is why writing the file above is legal.
 #if CONFIG_AIRDROP_COEX
         wifi_ap_record_t sta;
-        if (esp_wifi_sta_get_ap_info(&sta) != ESP_OK || sta.primary != 6) {
-            ESP_LOGW(TAG, "station lost channel 6; ending AWDL window");
+        if (esp_wifi_sta_get_ap_info(&sta) != ESP_OK ||
+            sta.primary != AIRDROP_COEX_CHANNEL) {
+            ESP_LOGW(TAG, "station left ch%d; ending dual-protocol window",
+                     AIRDROP_COEX_CHANNEL);
             break;
         }
-        // Photoframe's power manager also updates this setting periodically.
+        // Keep the radio awake so both STA and AWDL RX share the channel.
         esp_wifi_set_ps(WIFI_PS_NONE);
+        if ((TickType_t)(xTaskGetTickCount() - last_dual_log) >= pdMS_TO_TICKS(5000)) {
+            last_dual_log = xTaskGetTickCount();
+            struct AdStatus snap;
+            ad_stats_read(&snap);
+            ESP_LOGI(TAG,
+                     "dual-protocol ch%d: STA rssi=%d AWDL rx=%u B active=%d",
+                     AIRDROP_COEX_CHANNEL, (int)sta.rssi, (unsigned)snap.rx_bytes,
+                     (int)snap.rx_active);
+        }
 #endif
         ad_poll();
         airdrop_log_diagnostics();
