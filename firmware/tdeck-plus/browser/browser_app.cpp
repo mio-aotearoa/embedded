@@ -11,6 +11,7 @@
 #include "browser_app.h"
 
 #include "AppPage.h"
+#include "cpu_boost.h"
 #include "i18n.h"
 #include "url_util.h"   // bare host -> https://
 #include "ime_ja.h"
@@ -288,17 +289,30 @@ BrowserApp::~BrowserApp() {}
 
 bool BrowserApp::open(void)
 {
+    cpuBoostAcquire();  // Lexbor layout; restore on close/dismiss
+
     const lv_coord_t w = lv_disp_get_hor_res(nullptr);
     const lv_coord_t h = appPageContentH();
 
     root_ = appPageCreateRoot(kBg);
-    if (!root_) return false;
+    if (!root_)
+    {
+        cpuBoostRelease();
+        return false;
+    }
 
     snprintf(barTitle_, sizeof barTitle_, "%s", TR("Browser"));
     appPageBegin(barTitle_, &BrowserApp::dismiss);
 
     lexborUsePsram();
-    if (!tactilebrowser_core_init()) return false;
+    if (!tactilebrowser_core_init())
+    {
+        appPageEnd(&BrowserApp::dismiss);
+        appPageDeleteRootAsync(root_);
+        root_ = nullptr;
+        cpuBoostRelease();
+        return false;
+    }
     tactilebrowser_set_renderer(&s_iface);
 
     // The tall "< Browser" bar is two rows high while the root starts one row
@@ -363,6 +377,7 @@ void BrowserApp::close(void)
     ta_ = nullptr;
     view_ = nullptr;
     status_ = nullptr;
+    cpuBoostRelease();
 }
 
 void BrowserApp::setStatus(const char *msg)

@@ -1,5 +1,5 @@
 diff --git a/platformio.ini b/platformio.ini
-index 03a11235..cab7c94a 100644
+index 03a11235..c7c65ffe 100644
 --- a/platformio.ini
 +++ b/platformio.ini
 @@ -544,7 +544,13 @@ platform = platformio/espressif32@6.11.0
@@ -17,7 +17,7 @@ index 03a11235..cab7c94a 100644
  extra_scripts = pre:scripts/build/pre_gen_baked.py, pre:scripts/inject_wifi_env.py, pre:scripts/build/fatfs_exfat.py, pre:scripts/build/patch_lvgl_anim_uaf.py, pre:scripts/build/patch_lvgl_scroll_uaf.py, pre:scripts/build/patch_lvgl_async_del.py, pre:scripts/build/patch_lvgl_arabic.py, pre:scripts/build/patch_meshcore_txt_timestamp.py, pre:scripts/build/perf_lvgl.py, merge-bin.py
  custom_lvgl_o2 = core, draw, font, misc   ; LVGL's per-frame code at -O2 (scripts/build/perf_lvgl.py); widgets and extra stay -Os
  ; custom_lvgl_iram = lv_draw_sw_blend.c, lv_draw_label.c   ; off on the T-Deck: its ~6 KB of internal RAM is worth more than ~8% of a frame (on-device updates and TLS ran out)
-@@ -686,6 +692,54 @@ build_flags =
+@@ -686,6 +692,61 @@ build_flags =
    -D CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=16384
    -D CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=4096
  
@@ -69,10 +69,17 @@ index 03a11235..cab7c94a 100644
 +  -I ../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source
 +  -I ../../build/duktape
 +
++  ; --- OutRun (esp32s3-arcade-3d) + Voxel Flight ---
++  -D WADAMESH_ARCADE3D=1
++  -I ../../firmware/tdeck-plus/arcade3d
++  -I ../../firmware/tdeck-plus/arcade3d/game
++  -D WADAMESH_VOXELFLIGHT=1
++  -I ../../firmware/tdeck-plus/voxel_flight
++
  build_src_filter =
    +<*.cpp>
    +<*.c>
-@@ -696,6 +750,45 @@ build_src_filter =
+@@ -696,6 +757,48 @@ build_src_filter =
    +<ui-touch/*.cpp>
    +<ui-touch/*.c>
    +<../variants/lilygo_tdeck/*.cpp>
@@ -84,6 +91,9 @@ index 03a11235..cab7c94a 100644
 +  +<../../../firmware/tdeck-plus/localsend/*.cpp>
 +  +<../../../firmware/tdeck-plus/downloader/*.cpp>
 +  +<../../../firmware/tdeck-plus/browser/*.cpp>
++  +<../../../firmware/tdeck-plus/arcade3d/*.cpp>
++  +<../../../firmware/tdeck-plus/arcade3d/game/*.cpp>
++  +<../../../firmware/tdeck-plus/voxel_flight/*.cpp>
 +  +<../../../third_party/TactileBrowser/tactilebrowser_core/src/*.cpp>
 +  +<../../../build/duktape/duktape.c>
 +  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/core/*.c>
@@ -148,10 +158,10 @@ index 484c510a..b05aad5f 100644
   * Create a page root: full width, from just under the status bar to the bottom of the
   * screen, on lv_layer_top, opaque `bg_color`, non-scrollable and CLICKABLE so no press
 diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
-index f799c2e4..e8da1119 100644
+index f799c2e4..2649b759 100644
 --- a/src/ui-touch/UITask.cpp
 +++ b/src/ui-touch/UITask.cpp
-@@ -158,6 +158,24 @@ static void* wadaMp3Scratch() { return s_wada_mp3_scratch; }
+@@ -158,6 +158,30 @@ static void* wadaMp3Scratch() { return s_wada_mp3_scratch; }
  #include <Utils.h>
  #include <LvglPsramAlloc.h>   // PSRAM-preferred alloc helpers for the map tile cache
  #include "SnakeGame.h"        // Apps → Snake (self-contained game module)
@@ -173,10 +183,16 @@ index f799c2e4..e8da1119 100644
 +#if WADAMESH_BROWSER
 +#include "browser_app.h"       // Apps → Browser: HTML/CSS via the Lexbor core
 +#endif
++#if WADAMESH_ARCADE3D
++#include "arcade3d_app.h"      // Apps → OutRun: pseudo-3D racer (esp32s3-arcade-3d)
++#endif
++#if WADAMESH_VOXELFLIGHT
++#include "voxel_flight_app.h"  // Apps → Voxel Flight: procedural flyer at panel size
++#endif
  #include "LuaHost.h"          // Lua app host (LUA_APPS.md; Phase 0 spike gate)
  #include "LuaAppHost.h"       // sandboxed Lua apps (LUA_APPS.md Phase 1; self-gated on CAP_LUA_APPS)
  
-@@ -3101,6 +3119,13 @@ lv_coord_t appPageContentH() {
+@@ -3101,6 +3125,13 @@ lv_coord_t appPageContentH() {
    return (lv_coord_t)(lv_disp_get_ver_res(nullptr) - appPageContentTop());
  }
  
@@ -190,7 +206,7 @@ index f799c2e4..e8da1119 100644
  lv_obj_t* appPageCreateRoot(uint32_t bg_color) {
    lv_obj_t* root = lv_obj_create(lv_layer_top());
    lv_obj_remove_style_all(root);
-@@ -3231,6 +3256,8 @@ static void batteryTapCb(lv_event_t* e);   // fwd decl (defined near the battery
+@@ -3231,6 +3262,8 @@ static void batteryTapCb(lv_event_t* e);   // fwd decl (defined near the battery
  volatile bool g_usb_files_owns_serial = false;
  static volatile uint32_t g_sd_io_ms = 0;
  static inline void markSdIo() { const uint32_t t = millis(); g_sd_io_ms = t ? t : 1; }
@@ -199,7 +215,26 @@ index f799c2e4..e8da1119 100644
  
  // Async mesh-request activity: a small spinner glyph in the status bar while a
  // request is sending or awaiting a reply. markMeshRequest() stamps a send; the
-@@ -29957,7 +29984,19 @@ static const char* sdRemovedAlertText() {
+@@ -10926,6 +10959,18 @@ static void applySwipeGesture(int8_t swipe_x, int8_t swipe_y) {
+     else if (swipe_y != 0) SnakeGame::steer(0, swipe_y < 0 ? -1 : 1);
+     return;
+   }
++#if WADAMESH_ARCADE3D
++  if (Arcade3dApp::isOpen()) {
++    if (swipe_x != 0) Arcade3dApp::steer(swipe_x < 0 ? -1 : 1, 0);
++    return;
++  }
++#endif
++#if WADAMESH_VOXELFLIGHT
++  if (VoxelFlightApp::isOpen()) {
++    if (swipe_x != 0 || swipe_y != 0) VoxelFlightApp::steer(swipe_x, swipe_y);
++    return;
++  }
++#endif
+   // Every OTHER full-screen app page (Airtime, Spectrum, RF Monitor, Discover, VNC, Remote,
+   // Reader) also owns the screen, so swallow the swipe instead of letting it reach the tab
+   // switcher behind the page. Making the page root opaque + CLICKABLE only stops CLICKS:
+@@ -29957,7 +30002,19 @@ static const char* sdRemovedAlertText() {
                            : TR("SD card removed");
  }
  #endif
@@ -220,7 +255,7 @@ index f799c2e4..e8da1119 100644
  static lv_obj_t* s_fm_fmt_overlay = nullptr; // full-screen "formatting..." notice
  static lv_obj_t* s_fm_actions    = nullptr;  // per-entry action sheet
  static lv_obj_t* s_fm_prompt     = nullptr;  // text-input modal (rename / new folder)
-@@ -31862,12 +31901,73 @@ static void fmSdDoFormat() {
+@@ -31862,12 +31919,73 @@ static void fmSdDoFormat() {
        g_lv.task->showAlert(TR("SD is busy - close tools and retry"), 2600);
      return;
    }
@@ -298,7 +333,7 @@ index f799c2e4..e8da1119 100644
  // Tap on an unmounted SD row: try to mount, and if the card is unreadable
  // (no FAT16/FAT32/exFAT volume, or a corrupt one) offer to format.
  static void fmSdMountOrFormatCb(lv_event_t* e) {
-@@ -31875,7 +31975,7 @@ static void fmSdMountOrFormatCb(lv_event_t* e) {
+@@ -31875,7 +31993,7 @@ static void fmSdMountOrFormatCb(lv_event_t* e) {
    s_sd_retry_after_ms = 0;   // explicit user retry — bypass the mount backoff
    if (fmSdTryMount()) { fmShowRoots(); return; }
    s_confirm_owner_next = true;
@@ -307,7 +342,7 @@ index f799c2e4..e8da1119 100644
  }
  
  // Seed the core folder layout on a freshly-formatted MESHCOMOD card. These back
-@@ -31966,7 +32066,7 @@ static void sdWriteFatLabel(uint8_t pdrv, const char* label) {
+@@ -31966,7 +32084,7 @@ static void sdWriteFatLabel(uint8_t pdrv, const char* label) {
  static void fmSdLongPressFormatCb(lv_event_t* e) {
    if (lv_event_get_code(e) != LV_EVENT_LONG_PRESSED) return;
    s_confirm_owner_next = true;
@@ -316,7 +351,7 @@ index f799c2e4..e8da1119 100644
  }
  
  #endif  // HAS_TDECK_GT911 || HAS_THINKNODE_M9 (microSD mount/format helpers)
-@@ -34244,6 +34344,7 @@ static const char    kReaderHomeUrl[] = "sd:/home.htm";
+@@ -34244,6 +34362,7 @@ static const char    kReaderHomeUrl[] = "sd:/home.htm";
  static const char    kReaderChangelogUrl[] = "http://wadamesh.com/changelog.html";
  static lv_obj_t*     s_reader_root   = nullptr;
  static lv_obj_t*     s_reader_url_ta = nullptr;
@@ -324,7 +359,7 @@ index f799c2e4..e8da1119 100644
  static lv_obj_t*     s_reader_go     = nullptr;
  static lv_obj_t*     s_reader_editbtn= nullptr;    // floating "edit URL" button (shown while reading)
  static lv_obj_t*     s_reader_scroll = nullptr;    // flex-column body container (holds text + link labels)
-@@ -34262,7 +34363,7 @@ static auto&         s_reader_pending_url = psramStatic<char[300]>();
+@@ -34262,7 +34381,7 @@ static auto&         s_reader_pending_url = psramStatic<char[300]>();
  static char          s_reader_msg[110] = "";       // status text (worker writes, UI shows)
  static TaskHandle_t  s_reader_task    = nullptr;
  static bool          s_reader_pristine = false;    // URL field still holds the untouched default
@@ -333,7 +368,7 @@ index f799c2e4..e8da1119 100644
  static const size_t  kReaderTextCap =  60 * 1024;  // max extracted text we keep
  // Links found on the page: byte range in s_reader_text + resolved absolute href.
  using ReaderLink = ReaderContent::Link;
-@@ -34429,20 +34530,61 @@ static void readerFetchBody() {
+@@ -34429,20 +34548,61 @@ static void readerFetchBody() {
    if (!raw) { rawcap = 24 * 1024; raw = (uint8_t*)heap_caps_malloc(rawcap, MALLOC_CAP_SPIRAM); }
    int code = -1; size_t total = 0; bool source_ok = false;
    ReaderLocalResult local_result = ReaderLocalResult::NoStorage;
@@ -401,7 +436,7 @@ index f799c2e4..e8da1119 100644
          ReaderBufferStream sink(raw, rawcap - 1, generation);
          const int transfer_result = httpc.writeToStream(&sink);
          total = sink.size();
-@@ -34451,6 +34593,7 @@ static void readerFetchBody() {
+@@ -34451,6 +34611,7 @@ static void readerFetchBody() {
        httpc.end();
      }
    }
@@ -409,7 +444,7 @@ index f799c2e4..e8da1119 100644
    if (!raw) snprintf(result_msg, sizeof result_msg, "Out of memory");
    else if (source_ok && total >= 2 && raw[0] == 0x1f && (uint8_t)raw[1] == 0x8b)
      snprintf(result_msg, sizeof result_msg, "Page is gzip-compressed \xe2\x80\x94 not supported yet");
-@@ -34647,7 +34790,26 @@ static void readerShowMessage(const char* msg, uint32_t color) {
+@@ -34647,7 +34808,26 @@ static void readerShowMessage(const char* msg, uint32_t color) {
    lv_obj_set_style_text_color(l, lv_color_hex(color), LV_PART_MAIN);
    lv_label_set_text(l, msg);
  }
@@ -437,7 +472,20 @@ index f799c2e4..e8da1119 100644
  // Rebuild the body: flowing text split into paragraph labels + tappable link labels.
  static void readerRenderBody() {
    if (!s_reader_scroll) return;
-@@ -61843,6 +62005,31 @@ static unsigned long s_hw_last_space_ms = 0;
+@@ -56210,6 +56390,12 @@ static void updateTrackball(unsigned long now) {
+     s_tb_click_prev_app = click_now;
+     if (moved && (dx != 0 || dy != 0)) {
+       if (luaAppIsOpen()) luaAppSteer(dx, dy);
++#if WADAMESH_ARCADE3D
++      else if (Arcade3dApp::isOpen()) Arcade3dApp::steer(dx, dy);
++#endif
++#if WADAMESH_VOXELFLIGHT
++      else if (VoxelFlightApp::isOpen()) VoxelFlightApp::steer(dx, dy);
++#endif
+       else                SnakeGame::steer(dx, dy);
+       if (g_lv.task) g_lv.task->noteUserInput();
+     }
+@@ -61843,6 +62029,31 @@ static unsigned long s_hw_last_space_ms = 0;
  // Route a physical-keyboard character into the textarea currently being edited
  // — the on-screen keyboard's target, which is the chat composer directly or the
  // settings mirror textarea. No field open -> the key is ignored.
@@ -469,7 +517,7 @@ index f799c2e4..e8da1119 100644
  static void handleHwKey(int key) {
    if (key != ' ') s_hw_last_space_ms = 0;
    if (!g_lv.keyboard) return;
-@@ -62037,6 +62224,33 @@ if (g_lv.task && g_lv.task->isManualLock()) {
+@@ -62037,6 +62248,33 @@ if (g_lv.task && g_lv.task->isManualLock()) {
      if (g_lv.keyboard) lv_keyboard_set_textarea(g_lv.keyboard, nullptr);
      ta_focused = nullptr;
    }
@@ -503,7 +551,7 @@ index f799c2e4..e8da1119 100644
  #if CAP_KEYPAD_NAV && !defined(TLORA_PAGER)
    // Edit mode (keyboard-nav ON only): a focused field becomes the typing target after
    // select/Enter (below) — until then `ta` is null so the nav keys navigate. With
-@@ -62377,6 +62591,11 @@ if (g_lv.task && g_lv.task->isManualLock()) {
+@@ -62377,6 +62615,11 @@ if (g_lv.task && g_lv.task->isManualLock()) {
      }
      accentBoxHide();
    } else if (key == ' ') {
@@ -515,7 +563,7 @@ index f799c2e4..e8da1119 100644
      // Double-tap SPACE within kDoubleSpaceMs toggles between English and
      // the configured secondary keyboard. If no secondary is set, it behaves
      // as a normal space. The limit is 250 ms, except on the M9: its same-key
-@@ -62405,6 +62624,7 @@ if (g_lv.task && g_lv.task->isManualLock()) {
+@@ -62405,6 +62648,7 @@ if (g_lv.task && g_lv.task->isManualLock()) {
        lv_textarea_add_char(ta, ' ');
      }
    } else if (key == 0x0D) {                   // regular ENTER (CR)
@@ -523,7 +571,7 @@ index f799c2e4..e8da1119 100644
      // Enter is a non-typing action (send / newline / submit) — always tear down the
      // accent + @-mention popups. The Enter-to-send path keeps the keyboard up "for the
      // next message", so without this the accent box for the last letter lingers over
-@@ -66908,6 +67128,24 @@ enum AppDrawerAction {
+@@ -66908,6 +67152,30 @@ enum AppDrawerAction {
    APPACT_SOUND,
    APPACT_DRONE,
    APPACT_PHOTOS,
@@ -545,10 +593,16 @@ index f799c2e4..e8da1119 100644
 +#if WADAMESH_BROWSER
 +  APPACT_BROWSER,
 +#endif
++#if WADAMESH_ARCADE3D
++  APPACT_ARCADE3D,
++#endif
++#if WADAMESH_VOXELFLIGHT
++  APPACT_VOXELFLIGHT,
++#endif
    APPACT_LUA_BASE = 100,   // APPACT_LUA_BASE + i = installed Lua app s_lua_inst[i]
  };
  // OTP Messenger (app drawer -> APPACT_OTP): the screens; protocol in OtpCore.cpp.
-@@ -67041,7 +67279,10 @@ static const AppTileDef k_app_tiles[] = {
+@@ -67041,7 +67309,10 @@ static const AppTileDef k_app_tiles[] = {
  #endif
    { UI_ICON_SLIDERS_HORIZONTAL, "Settings",  APPACT_SETTINGS,  HUE_SYS },     // "!" when an update waits
  #if defined(MULTI_TRANSPORT_COMPANION) && CAP_WEB_BROWSER
@@ -560,7 +614,7 @@ index f799c2e4..e8da1119 100644
  #endif
  #if CAP_FILESYSTEM || defined(TLORA_PAGER)
    { UI_ICON_FOLDER,             "Files",     APPACT_FILES,     HUE_SYS },
-@@ -67056,6 +67297,21 @@ static const AppTileDef k_app_tiles[] = {
+@@ -67056,6 +67327,27 @@ static const AppTileDef k_app_tiles[] = {
    { UI_ICON_GAMEPAD_2,          "Snake",     APPACT_SNAKE,     HUE_MSG },     // native snake (Lua boards install it from the Store)
  #else
    { UI_ICON_STORE,              "Store",     APPACT_STORE,     HUE_MSG },     // Lua app store
@@ -579,10 +633,16 @@ index f799c2e4..e8da1119 100644
 +#endif
 +#if WADAMESH_DOWNLOAD
 +  { UI_ICON_LINK,               "Download",   APPACT_DOWNLOAD,  HUE_SYS },     // any http(s) URL to the card
++#endif
++#if WADAMESH_ARCADE3D
++  { UI_ICON_GAUGE,              "OutRun",     APPACT_ARCADE3D,  HUE_MSG },     // pseudo-3D racer
++#endif
++#if WADAMESH_VOXELFLIGHT
++  { UI_ICON_COMPASS,            "Voxel",      APPACT_VOXELFLIGHT, HUE_MSG },   // procedural voxel flight
  #endif
    { UI_ICON_HOUSE,              "Home",      APPACT_CMDCENTER, HUE_SYS },     // back to the Home widgets
    { UI_ICON_POWER,              "Power",     APPACT_POWER,     kAppHueDanger },
-@@ -67441,6 +67697,9 @@ static void appLaunch(int act, lv_event_t* e) {
+@@ -67441,6 +67733,9 @@ static void appLaunch(int act, lv_event_t* e) {
  #endif
  #if defined(MULTI_TRANSPORT_COMPANION) && CAP_WEB_BROWSER
      case APPACT_READER:    openReaderPage();     return;   // on-device text browser (no proxy)
@@ -592,7 +652,7 @@ index f799c2e4..e8da1119 100644
  #endif
      case APPACT_ADVERT:    openAdvertModalCb(e);  return;
      case APPACT_POWER:     openPowerMenu();      return;
-@@ -67452,6 +67711,21 @@ static void appLaunch(int act, lv_event_t* e) {
+@@ -67452,6 +67747,27 @@ static void appLaunch(int act, lv_event_t* e) {
  #else
      case APPACT_SNAKE:     SnakeGame::launch();  return;
  #endif
@@ -611,10 +671,16 @@ index f799c2e4..e8da1119 100644
 +#if WADAMESH_DOWNLOAD
 +    case APPACT_DOWNLOAD:  DownloadApp::launch();  return; // any http(s) URL to the card
 +#endif
++#if WADAMESH_ARCADE3D
++    case APPACT_ARCADE3D:  Arcade3dApp::launch(); return;  // OutRun-style pseudo-3D racer
++#endif
++#if WADAMESH_VOXELFLIGHT
++    case APPACT_VOXELFLIGHT: VoxelFlightApp::launch(); return; // procedural flyer at panel size
++#endif
  #if defined(HAS_TOUCH_UI)
      case APPACT_TERMINAL:  homeTerminalCb(e);    return;
  #endif
-@@ -68226,29 +68500,59 @@ static void statusBarTapCb(lv_event_t* e) {
+@@ -68226,29 +68542,59 @@ static void statusBarTapCb(lv_event_t* e) {
    if (s_cc_root) closeControlCenter(); else openControlCenter();
  }
  
@@ -693,7 +759,7 @@ index f799c2e4..e8da1119 100644
      lv_area_t ba;
      lv_obj_get_coords(g_statusbar.root, &ba);
      if (pt.y < ba.y1 + STATUSBAR_H) return;   // the top row keeps the bar's usual tap
-@@ -68616,7 +68920,12 @@ static void buildGlobalStatusBar() {
+@@ -68616,7 +68962,12 @@ static void buildGlobalStatusBar() {
    // keypad users open the control center via the dedicated key.)
    lv_obj_add_flag(g_statusbar.root, NAV_SKIP_FLAG);
    lv_obj_add_event_cb(g_statusbar.root, statusBarTapCb, LV_EVENT_CLICKED, nullptr);
@@ -707,7 +773,7 @@ index f799c2e4..e8da1119 100644
    // Hold the bar for 3 s to drop a screenshot to the SD card.
    lv_obj_add_event_cb(g_statusbar.root, statusBarHoldCb, LV_EVENT_PRESSED,    nullptr);
    lv_obj_add_event_cb(g_statusbar.root, statusBarHoldCb, LV_EVENT_PRESSING,   nullptr);
-@@ -75833,7 +76142,10 @@ static void refreshStatusLabels() {
+@@ -75833,7 +76184,10 @@ static void refreshStatusLabels() {
        readerStart(pending_url);
      } else {
        if (s_reader_status) lv_label_set_text(s_reader_status, s_reader_msg);
@@ -719,7 +785,7 @@ index f799c2e4..e8da1119 100644
          if (s_reader_ok) {                  // …with a page
            readerRenderBody();
            readerSetAddrExpanded(false);     // collapse the address bar -> fullscreen reading
-@@ -94681,8 +94993,8 @@ void UITask::loop() {
+@@ -94681,8 +95035,8 @@ void UITask::loop() {
            char drv[3] = { (char)('0' + pdrv), ':', 0 };
            void* work = malloc(4096);                       // f_mkfs scratch (>= FF_MAX_SS)
            if (work) {
@@ -730,7 +796,7 @@ index f799c2e4..e8da1119 100644
                mkfs_ok = true;
                ok = true;
              }
-@@ -96845,3 +97157,17 @@ static void docAuditFocus() {
+@@ -96845,3 +97199,17 @@ static void docAuditFocus() {
  }
  #endif
  #endif  // DOC_CAPTURE

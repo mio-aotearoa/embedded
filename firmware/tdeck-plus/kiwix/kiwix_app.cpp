@@ -351,6 +351,9 @@ bool KiwixApp::open(void)
 
     showArchives();
     appPageBindTextField(nullptr);      // the archive list needs no typing
+    // Reserve the catalogue worker stack now, before list/widgets fragment the
+    // last contiguous internal block (otherwise Catalogue reports OOM).
+    (void)kiwixCatalogWarmup();
     return true;
 }
 
@@ -580,15 +583,34 @@ void KiwixApp::imeToggleCb(lv_event_t* e)
                                           : TR("Type a title prefix, then Enter"));
 }
 
+// Defer catalogue navigation out of list-button event handlers: wiping the
+// list deletes the button mid-CLICKED and LVGL re-enters / drops the fetch
+// ("already loading" + empty list). Same pattern as wadamesh's trust rebuild.
+char s_catNavDir[192];
+bool s_catNavQueued = false;
+
+// lv_list_add_btn puts the caption in LV_LABEL_LONG_SCROLL_CIRCULAR, so long
+// .zim names marquee forever. Switch the caption to wrap and let the row grow.
+void catalogWrapRow(lv_obj_t* row)
+{
+    if (!row) return;
+    const uint32_t n = lv_obj_get_child_cnt(row);
+    if (!n) return;
+    lv_obj_t* lbl = lv_obj_get_child(row, n - 1);  // caption after optional icon
+    if (!lbl) return;
+    lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
+    lv_obj_set_flex_grow(lbl, 1);
+    lv_obj_set_height(lbl, LV_SIZE_CONTENT);
+    lv_obj_set_style_pad_ver(row, 4, LV_PART_MAIN);
+    lv_obj_set_height(row, LV_SIZE_CONTENT);
+}
+
 // One row per folder/archive of the mirror's index, browsed a level at a time.
 // The listing is fetched on a worker task; this only starts it and clears the
 // list, and catalogTickCb fills the rows when the answer is in.
 void KiwixApp::showCatalogue(const char* dir)
 {
     catDir_ = dir ? dir : "";
-    catItems_.clear();
-    catRows_ = 0;
-    lv_obj_clean(list_);
     if (search_) lv_obj_add_flag(search_, LV_OBJ_FLAG_HIDDEN);
     if (url_) lv_obj_add_flag(url_, LV_OBJ_FLAG_HIDDEN);
     if (list_) lv_obj_clear_flag(list_, LV_OBJ_FLAG_HIDDEN);
@@ -596,9 +618,15 @@ void KiwixApp::showCatalogue(const char* dir)
 
     if (!kiwixCatalogStart(catDir_.c_str()))
     {
-        setStatus(TR("The catalogue is already loading"));
+        const KiwixCatalogState& st = kiwixCatalogState();
+        setStatus(st.err[0] ? st.err : TR("Could not start the catalogue"));
         return;
     }
+
+    // Only wipe after the worker accepted the path (or queued it).
+    catItems_.clear();
+    catRows_ = 0;
+    if (list_) lv_obj_clean(list_);
     setStatus(TR("Loading the catalogue\xE2\x80\xA6"));
     if (!catTimer_) catTimer_ = lv_timer_create(catalogTickCb, 200, nullptr);
 }
@@ -627,7 +655,11 @@ void KiwixApp::catalogTickCb(lv_timer_t* t)
     {
         app->setStatus(err);
         lv_obj_t* back = lv_list_add_btn(app->list_, LV_SYMBOL_LEFT, TR("Back to archives"));
-        if (back) lv_obj_add_event_cb(back, catalogUpCb, LV_EVENT_CLICKED, nullptr);
+        if (back)
+        {
+            catalogWrapRow(back);
+            lv_obj_add_event_cb(back, catalogUpCb, LV_EVENT_CLICKED, nullptr);
+        }
         return;
     }
 
@@ -637,7 +669,11 @@ void KiwixApp::catalogTickCb(lv_timer_t* t)
     if (!app->catDir_.empty())
     {
         lv_obj_t* up = lv_list_add_btn(app->list_, LV_SYMBOL_UP, "..");
-        if (up) lv_obj_add_event_cb(up, catalogUpCb, LV_EVENT_CLICKED, nullptr);
+        if (up)
+        {
+            catalogWrapRow(up);
+            lv_obj_add_event_cb(up, catalogUpCb, LV_EVENT_CLICKED, nullptr);
+        }
     }
     for (size_t i = 0; i < app->catItems_.size(); ++i)
     {
@@ -647,17 +683,40 @@ void KiwixApp::catalogTickCb(lv_timer_t* t)
         else if (it.size[0]) snprintf(label, sizeof label, "%s  (%s)", it.name, it.size);
         else snprintf(label, sizeof label, "%s", it.name);
         lv_obj_t* row = lv_list_add_btn(app->list_, it.isDir ? LV_SYMBOL_DIRECTORY : LV_SYMBOL_DOWNLOAD, label);
-        if (row) lv_obj_add_event_cb(row, catalogItemCb, LV_EVENT_CLICKED, (void*)(uintptr_t)(i + 1));
+        if (row)
+        {
+            // lv_list defaults to circular scroll on long names — wrap instead.
+            catalogWrapRow(row);
+            lv_obj_add_event_cb(row, catalogItemCb, LV_EVENT_CLICKED, (void*)(uintptr_t)(i + 1));
+        }
     }
     char msg[48];
     snprintf(msg, sizeof msg, TR("%u entries"), (unsigned)app->catRows_);
     app->setStatus(msg);
 }
 
+void KiwixApp::showCatalogueAsync(void*)
+{
+    s_catNavQueued = false;
+    if (s_active) s_active->showCatalogue(s_catNavDir);
+}
+
+void KiwixApp::requestCatalogue(const char* dir)
+{
+    snprintf(s_catNavDir, sizeof s_catNavDir, "%s", dir ? dir : "");
+    if (s_catNavQueued) return;
+    s_catNavQueued = true;
+    if (lv_async_call(showCatalogueAsync, nullptr) != LV_RES_OK)
+    {
+        s_catNavQueued = false;
+        if (s_active) s_active->showCatalogue(s_catNavDir);
+    }
+}
+
 void KiwixApp::catalogueCb(lv_event_t* e)
 {
     (void)e;
-    if (s_active) s_active->showCatalogue("");
+    requestCatalogue("");
 }
 
 void KiwixApp::catalogUpCb(lv_event_t* e)
@@ -673,7 +732,7 @@ void KiwixApp::catalogUpCb(lv_event_t* e)
     while (!up.empty() && up.back() == '/') up.pop_back();
     const size_t slash = up.rfind('/');
     up.resize(slash == std::string::npos ? 0 : slash);
-    s_active->showCatalogue(up.c_str());
+    requestCatalogue(up.c_str());
 }
 
 void KiwixApp::catalogItemCb(lv_event_t* e)
@@ -688,7 +747,8 @@ void KiwixApp::catalogItemCb(lv_event_t* e)
         std::string child = s_active->catDir_;
         if (!child.empty()) child += '/';
         child += it.name;
-        s_active->showCatalogue(child.c_str());
+        // Copy the name before any deferred wipe of catItems_.
+        requestCatalogue(child.c_str());
         return;
     }
 

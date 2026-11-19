@@ -3,10 +3,12 @@
 
 #include <Arduino.h>
 #include <HTTPClient.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include <esp_heap_caps.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <mbedtls/platform.h>
 
 #include <algorithm>
 #include <ctype.h>
@@ -17,10 +19,25 @@
 
 namespace
 {
-constexpr const char* kBase = "https://download.kiwix.org/zim/";
+// Official download.kiwix.org/zim/ now 301s the root index to hub.kiwix.org
+// (WordPress), so Apache-style folder browsing there is gone. FAU still serves
+// the classic directory listing the parser expects; file downloads keep using
+// download.kiwix.org (subpaths still redirect to lb.download.kiwix.org).
+constexpr const char* kBase = "https://ftp.fau.de/kiwix/zim/";
 constexpr size_t kMaxListing = 64 * 1024;  // the biggest folder index is far below this
 constexpr size_t kMaxItems = 80;
 constexpr int kMaxHops = 4;
+
+// Same TLS-buffer workaround as http_download: Arduino-ESP32 mbedtls wants
+// ~32 KB contiguous internal RAM; with the UI up that fails as HTTP -1.
+void* tlsPsramCalloc(size_t n, size_t size)
+{
+    void* p = heap_caps_calloc(n, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!p) p = heap_caps_calloc(n, size, MALLOC_CAP_8BIT);
+    return p;
+}
+
+void tlsPsramFree(void* p) { heap_caps_free(p); }
 
 // GET `url` into `body`, following up to kMaxHops redirects (absolute or relative).
 bool readPageOnce(const char* url, std::string& body, char* err, size_t errLen)
@@ -28,11 +45,11 @@ bool readPageOnce(const char* url, std::string& body, char* err, size_t errLen)
     String current(url);
     for (int hop = 0; hop <= kMaxHops; ++hop)
     {
-        WiFiClientSecure tls;
-        WiFiClient plain;
         HTTPClient http;
+        WiFiClientSecure* tls = nullptr;
+        WiFiClient* plain = nullptr;
         http.setReuse(false);
-        http.setConnectTimeout(15000);
+        http.setConnectTimeout(20000);
         http.setTimeout(20000);
         http.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
         http.setUserAgent("wadamesh-tdeck");
@@ -40,15 +57,30 @@ bool readPageOnce(const char* url, std::string& body, char* err, size_t errLen)
         bool began = false;
         if (current.startsWith("https://"))
         {
-            tls.setInsecure();  // no cert store on the device
-            began = http.begin(tls, current);
+            tls = new WiFiClientSecure();
+            if (!tls)
+            {
+                snprintf(err, errLen, "out of memory for TLS");
+                return false;
+            }
+            tls->setInsecure();  // no cert store on the device
+            tls->setHandshakeTimeout(45);
+            began = http.begin(*tls, current);
         }
         else
         {
-            began = http.begin(plain, current);
+            plain = new WiFiClient();
+            if (!plain)
+            {
+                snprintf(err, errLen, "out of memory for TCP");
+                return false;
+            }
+            began = http.begin(*plain, current);
         }
         if (!began)
         {
+            delete tls;
+            delete plain;
             snprintf(err, errLen, "cannot parse the catalogue URL");
             return false;
         }
@@ -57,8 +89,11 @@ bool readPageOnce(const char* url, std::string& body, char* err, size_t errLen)
         const int code = http.GET();
         if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308)
         {
-            String loc = http.header("Location");
+            // getLocation() — header("Location") is empty without collectHeaders().
+            String loc = http.getLocation();
             http.end();
+            delete tls;
+            delete plain;
             if (!loc.length())
             {
                 snprintf(err, errLen, "catalogue redirect without a Location");
@@ -81,6 +116,8 @@ bool readPageOnce(const char* url, std::string& body, char* err, size_t errLen)
             snprintf(err, errLen, "HTTP %d (%s) from the catalogue", code,
                      HTTPClient::errorToString(code).c_str());
             http.end();
+            delete tls;
+            delete plain;
             return false;
         }
 
@@ -104,6 +141,8 @@ bool readPageOnce(const char* url, std::string& body, char* err, size_t errLen)
             body.append(buf, (size_t)got);
         }
         http.end();
+        delete tls;
+        delete plain;
         if (body.empty())
         {
             snprintf(err, errLen, "the catalogue is empty");
@@ -211,65 +250,165 @@ namespace
 std::vector<KiwixCatalogItem> s_items;
 KiwixCatalogState s_state;
 char s_dir[192];
+char s_pending[192];
+volatile bool s_have_pending = false;
+TaskHandle_t s_task = nullptr;
+StaticTask_t* s_tcb = nullptr;
+StackType_t* s_stack = nullptr;
+uint32_t s_stackBytes = 0;
 
-void catalogTask(void*)
+void fetchOne(const char* leaf, std::vector<KiwixCatalogItem>& items, char* err, size_t errLen,
+              bool& ok)
 {
-    std::vector<KiwixCatalogItem> items;
-    char err[96] = {};
-    bool ok = false;
+    ok = false;
+    err[0] = '\0';
+    items.clear();
     if (WiFi.status() != WL_CONNECTED)
     {
-        snprintf(err, sizeof err, "Connect to Wi-Fi first");
+        snprintf(err, errLen, "Connect to Wi-Fi first");
+        return;
     }
-    else
-    {
-        char url[256];
-        const char* leaf = s_dir;
-        while (*leaf == '/') ++leaf;
-        if (*leaf) snprintf(url, sizeof url, "%s%s/", kBase, leaf);
-        else       snprintf(url, sizeof url, "%s", kBase);
 
-        std::string html;
-        ok = readPage(url, html, err, sizeof err);
-        if (ok)
+    char url[256];
+    while (*leaf == '/') ++leaf;
+    if (*leaf) snprintf(url, sizeof url, "%s%s/", kBase, leaf);
+    else       snprintf(url, sizeof url, "%s", kBase);
+
+    std::string html;
+    ok = readPage(url, html, err, errLen);
+    if (!ok) return;
+    parseListing(html, items);
+    if (items.empty())
+    {
+        snprintf(err, errLen, "No archives in this folder");
+        ok = false;
+    }
+}
+
+// Long-lived worker. Stack is reserved with xTaskCreateStatic (see
+// kiwixCatalogWarmup): a plain xTaskCreate(16 KB) fails once LVGL has
+// fragmented internal heap ("out of memory for catalogue task").
+void catalogTask(void*)
+{
+    mbedtls_platform_set_calloc_free(tlsPsramCalloc, tlsPsramFree);
+
+    for (;;)
+    {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+        for (;;)
         {
-            parseListing(html, items);
-            if (items.empty())
+            char leaf[192];
+            snprintf(leaf, sizeof leaf, "%s", s_dir);
+
+            std::vector<KiwixCatalogItem> items;
+            char err[96] = {};
+            bool ok = false;
+            fetchOne(leaf, items, err, sizeof err, ok);
+
+            // Folder tap while this hop was in flight: drop the stale result.
+            if (s_have_pending)
             {
-                snprintf(err, sizeof err, "No archives in this folder");
-                ok = false;
+                snprintf(s_dir, sizeof s_dir, "%s", s_pending);
+                s_have_pending = false;
+                continue;
+            }
+
+            if (ok) s_items.swap(items);
+            else    s_items.clear();
+            snprintf(s_state.err, sizeof s_state.err, "%s", ok ? "" : err);
+            s_state.items = &s_items;
+            s_state.ok = ok;
+            s_state.running = false;
+            s_state.done = true;
+            break;
+        }
+    }
+}
+
+bool spawnCatalogTask(void)
+{
+    if (s_task) return true;
+
+    if (!s_tcb)
+    {
+        s_tcb = (StaticTask_t*)heap_caps_malloc(sizeof(StaticTask_t),
+                                                MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    }
+    if (!s_stack)
+    {
+        // Prefer internal RAM (TLS is happier there). Same size ladder as the
+        // ESP-AI gen worker — 16 KB contiguous often does not exist late in UI
+        // life, but 8–12 KB still does.
+        static const uint32_t kSizes[] = {12 * 1024, 10 * 1024, 8 * 1024, 6 * 1024};
+        for (uint32_t sz : kSizes)
+        {
+            s_stack = (StackType_t*)heap_caps_malloc(sz, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+            if (s_stack)
+            {
+                s_stackBytes = sz;
+                break;
+            }
+        }
+        if (!s_stack)
+        {
+            for (uint32_t sz : kSizes)
+            {
+                s_stack = (StackType_t*)heap_caps_malloc(sz, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                if (s_stack)
+                {
+                    s_stackBytes = sz;
+                    break;
+                }
             }
         }
     }
-    if (ok) s_items.swap(items);
-    else    s_items.clear();
-    snprintf(s_state.err, sizeof s_state.err, "%s", ok ? "" : err);
-    s_state.items = &s_items;
-    s_state.ok = ok;
-    s_state.running = false;
-    s_state.done = true;
-    vTaskDelete(nullptr);
+    if (!s_tcb || !s_stack) return false;
+
+    s_task = xTaskCreateStaticPinnedToCore(
+        catalogTask, "kicat", s_stackBytes / sizeof(StackType_t), nullptr, 4, s_stack, s_tcb, 0);
+    if (!s_task) return false;
+
+    Serial.printf("[kicat] stack %u B (free_int=%u max=%u psram=%u)\n",
+                  (unsigned)s_stackBytes, (unsigned)ESP.getFreeHeap(),
+                  (unsigned)ESP.getMaxAllocHeap(),
+                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    return true;
 }
 }  // namespace
 
+bool kiwixCatalogWarmup(void) { return spawnCatalogTask(); }
+
 bool kiwixCatalogStart(const char* dir)
 {
-    if (s_state.running) return false;
     const char* leaf = dir ? dir : "";
     if (strlen(leaf) >= sizeof s_dir) return false;
+
+    // Supersede an in-flight listing instead of failing the UI.
+    if (s_state.running)
+    {
+        snprintf(s_pending, sizeof s_pending, "%s", leaf);
+        s_have_pending = true;
+        return true;
+    }
+
     snprintf(s_dir, sizeof s_dir, "%s", leaf);
+    s_have_pending = false;
     s_state.running = true;
     s_state.done = false;
     s_state.ok = false;
     s_state.err[0] = '\0';
-    // The same shape as the Reader's fetch (16 KB/4), which does the same HTTPS
-    // GET successfully. 10 KB at priority 1 lost the TLS handshake to the UI
-    // task often enough to fail with HTTPClient -1.
-    if (xTaskCreate(catalogTask, "kicat", 16384, nullptr, 4, nullptr) != pdPASS)
+
+    if (!spawnCatalogTask())
     {
         s_state.running = false;
+        snprintf(s_state.err, sizeof s_state.err, "out of memory for catalogue task");
+        s_state.done = true;
+        s_state.ok = false;
         return false;
     }
+
+    xTaskNotifyGive(s_task);
     return true;
 }
 

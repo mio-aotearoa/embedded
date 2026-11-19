@@ -38,6 +38,8 @@ class KiwixApp
     void setStatus(const char *msg);
     void startDownload(const char *url);
     void showCatalogue(const char *dir);
+    static void requestCatalogue(const char *dir);
+    static void showCatalogueAsync(void *p);
 
     static void archiveCb(lv_event_t *e);
     static void downloadCb(lv_event_t *e);

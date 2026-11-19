@@ -5,6 +5,7 @@
 #include "esp32ai_app.h"
 
 #include "AppPage.h"
+#include "cpu_boost.h"
 #include "http_download.h"
 #include "i18n.h"
 #include "llm_port.h"
@@ -103,11 +104,17 @@ Esp32AiApp::~Esp32AiApp() {}
 
 bool Esp32AiApp::open(void)
 {
+    cpuBoostAcquire();  // TinyStories matmul; restore on close/dismiss
+
     const lv_coord_t w = lv_disp_get_hor_res(nullptr);
     const lv_coord_t h = appPageContentH();
 
     root_ = appPageCreateRoot(kBg);
-    if (!root_) return false;
+    if (!root_)
+    {
+        cpuBoostRelease();
+        return false;
+    }
 
     snprintf(barTitle_, sizeof barTitle_, "%s", TR("ESP-AI"));
     appPageBegin(barTitle_, &Esp32AiApp::dismiss);
@@ -169,6 +176,7 @@ void Esp32AiApp::close(void)
     streamBody_ = nullptr;
     pending_ = -1;
     chatMode_ = false;
+    cpuBoostRelease();
 }
 
 void Esp32AiApp::setStatus(const char *msg)
