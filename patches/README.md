@@ -53,6 +53,10 @@ table instead of the fork's dual 4.5 MB slots.
   restores the upstream tree exactly. The same patch also wires the SD format
   chooser, live Web/Reader fetch stages in the status line, and
   `readerWebFont()` for the Browser app's CJK faces.
+* `0002-wifi-off-on-battery.patch` — opt-in Settings → Battery → “Wi-Fi off on
+  battery”. While unplugged, a runtime hold gates `wifiConfigWantsWifi()` so the
+  modem powers down without rewriting the user's Wi-Fi toggle; USB power clears
+  the hold and brings Wi-Fi back.
 
 ## esp32-photoframe
 

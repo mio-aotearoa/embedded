@@ -1,0 +1,262 @@
+diff --git a/src/helpers/esp32/TouchPrefsSchema.h b/src/helpers/esp32/TouchPrefsSchema.h
+index 70718ba9..a323355e 100644
+--- a/src/helpers/esp32/TouchPrefsSchema.h
++++ b/src/helpers/esp32/TouchPrefsSchema.h
+@@ -9,7 +9,7 @@
+ namespace TouchPrefsSchema {
+ 
+ static constexpr uint16_t MAGIC = 0x5743;   // 'WC' (WadaCfg)
+-static constexpr uint8_t CURRENT_VERSION = 73;   // v49: fem_lna default flip on the V4-R8; v50: map tile z/x/y line off by default (no new fields); v51: console_mode (boot into the text console; new trailing field, default OFF); v52: console_monitor (show incoming messages in the console, default ON); v54: boot_wifi_time + boot_wifi_open (cold-boot saved-Wi-Fi time sync, #383; both OFF); v55: loud_alerts (resonant-pitch chime, #388; OFF); v56: theme_mode (Night/Day, with high-contrast variants, #296/#544; default Night); v57: gps_fuzz_m (displace the advertised position, #399; 0 = off); v58: Attaky notification blink enable + room/DM color indexes (#423); v59: telem_loc_exact (answer position requests from chosen contacts with the REAL fix instead of the advert displacement; 0 = keep it displaced); v60: home_key_keeps_drawer (#491; default OFF); v61: ble_kbd_* (Bluetooth serves a keyboard instead of the phone app, its layout and the paired keyboard; default phone app); v62: ble_kbd_back (a second key that acts as Back; 0 = only Esc); v63: V4-R8 ui_scale reset before exposing font-only presets (#536); v64: report_ping + report_done_n (beta test reports: the opt-in install count and the tag this device already reported on; both default 0); v65: ThinkNode M9 ui_scale reset before exposing font-only presets, the same one-time correction v63 made for the V4-R8 (no new field); v66: condense_nav (landscape nav rail + icon-only Home launchers, #592; default OFF); v67: T-Pager keyboard navigation (#591): kbd_nav ON and its own key bindings, a one-time reset on that board only (no new field); v68: Attaky Orientation setting: ui_rotation reset once to its landscape default, on that board only (no new field); v69: T-Deck trackball mode: tb_nav holds 0 cursor / 1 D-pad nav / 2 scroll, and scroll is the T-Deck default (a one-time flip of cursor installs; no new field); v70: T-Deck ui_scale reset before exposing the font-only text sizes, as v63/v65 did for the V4-R8 and M9 (no new field); v71: Wio Tracker L2 and CrowPanel P4 10.1 Orientation setting: ui_rotation reset once to their landscape default, on those boards only (no new field); v72: ct_purge_on + ct_purge_days (remove contacts not heard from in N days, favourites kept, #719; OFF, 30 days); v73: chats_unread_only (the Chats "U" (unread only) chip, #824; OFF)
++static constexpr uint8_t CURRENT_VERSION = 74;   // v49: fem_lna default flip on the V4-R8; v50: map tile z/x/y line off by default (no new fields); v51: console_mode (boot into the text console; new trailing field, default OFF); v52: console_monitor (show incoming messages in the console, default ON); v54: boot_wifi_time + boot_wifi_open (cold-boot saved-Wi-Fi time sync, #383; both OFF); v55: loud_alerts (resonant-pitch chime, #388; OFF); v56: theme_mode (Night/Day, with high-contrast variants, #296/#544; default Night); v57: gps_fuzz_m (displace the advertised position, #399; 0 = off); v58: Attaky notification blink enable + room/DM color indexes (#423); v59: telem_loc_exact (answer position requests from chosen contacts with the REAL fix instead of the advert displacement; 0 = keep it displaced); v60: home_key_keeps_drawer (#491; default OFF); v61: ble_kbd_* (Bluetooth serves a keyboard instead of the phone app, its layout and the paired keyboard; default phone app); v62: ble_kbd_back (a second key that acts as Back; 0 = only Esc); v63: V4-R8 ui_scale reset before exposing font-only presets (#536); v64: report_ping + report_done_n (beta test reports: the opt-in install count and the tag this device already reported on; both default 0); v65: ThinkNode M9 ui_scale reset before exposing font-only presets, the same one-time correction v63 made for the V4-R8 (no new field); v66: condense_nav (landscape nav rail + icon-only Home launchers, #592; default OFF); v67: T-Pager keyboard navigation (#591): kbd_nav ON and its own key bindings, a one-time reset on that board only (no new field); v68: Attaky Orientation setting: ui_rotation reset once to its landscape default, on that board only (no new field); v69: T-Deck trackball mode: tb_nav holds 0 cursor / 1 D-pad nav / 2 scroll, and scroll is the T-Deck default (a one-time flip of cursor installs; no new field); v70: T-Deck ui_scale reset before exposing the font-only text sizes, as v63/v65 did for the V4-R8 and M9 (no new field); v71: Wio Tracker L2 and CrowPanel P4 10.1 Orientation setting: ui_rotation reset once to their landscape default, on those boards only (no new field); v72: ct_purge_on + ct_purge_days (remove contacts not heard from in N days, favourites kept, #719; OFF, 30 days); v73: chats_unread_only (the Chats "U" (unread only) chip, #824; OFF); v74: wifi_off_batt (turn Wi-Fi off while on battery; OFF)
+ static constexpr uint8_t BROKEN_MID_INSERT_VERSION = 44;
+ 
+ // Persisted byte layout. New fields must be appended at the end: older blobs
+@@ -148,6 +148,10 @@ struct __attribute__((packed)) Config {
+   // v73 (#824): the Chats "U" (unread only) chip. While on, the inbox lists only threads with
+   // unread messages, within whichever All / Channels / Direct chip is active.
+   uint8_t  chats_unread_only;
++  // v74: while on battery (no USB / charge source), keep the Wi-Fi modem off even if
++  // the user's radio toggle is on. The toggle itself is not rewritten — plugging in
++  // USB restores Wi-Fi. Default OFF (opt-in).
++  uint8_t  wifi_off_batt;
+ };
+ 
+ static constexpr size_t HEADER_SIZE = offsetof(Config, bright);
+@@ -163,8 +167,11 @@ static_assert(offsetof(Config, web_mirror) == offsetof(Config, rx_queue) + sizeo
+ // whichever board is using the file backend. 163 bytes today.
+ static_assert(sizeof(Config) <= 2048,
+               "Config exceeds the SdNvsPrefs value cap; prefs would silently stop saving");
+-static_assert(offsetof(Config, chats_unread_only) + sizeof(Config::chats_unread_only) == sizeof(Config),
++static_assert(offsetof(Config, wifi_off_batt) + sizeof(Config::wifi_off_batt) == sizeof(Config),
+               "new preference fields must remain trailing");
++static_assert(offsetof(Config, wifi_off_batt) ==
++                  offsetof(Config, chats_unread_only) + sizeof(Config::chats_unread_only),
++              "wifi_off_batt must follow chats_unread_only");
+ static_assert(offsetof(Config, chats_unread_only) ==
+                   offsetof(Config, ct_purge_days) + sizeof(Config::ct_purge_days),
+               "chats_unread_only must follow ct_purge_days");
+diff --git a/src/helpers/esp32/TouchPrefsStore.cpp b/src/helpers/esp32/TouchPrefsStore.cpp
+index 8cab2b64..9bb5b92d 100644
+--- a/src/helpers/esp32/TouchPrefsStore.cpp
++++ b/src/helpers/esp32/TouchPrefsStore.cpp
+@@ -175,6 +175,7 @@ static void cfgSetDefaults(TouchCfg& c) {
+   c.ct_purge_on       = 0;      // OFF: contacts stay until deleted (v72, #719)
+   c.ct_purge_days     = TOUCH_CT_PURGE_DEFAULT_DAYS;
+   c.chats_unread_only = 0;      // OFF: Chats lists every thread (v73, #824)
++  c.wifi_off_batt     = 0;      // OFF: keep Wi-Fi available on battery unless asked (v74)
+   c.report_done_n     = 0;      // no beta reported on yet
+   c.boot_advert       = 0;      // OFF: no automatic advert on boot — opt-in (#76)
+   c.console_mode      = 0;      // OFF: boot into the graphical UI (CONSOLE_MODE.md)
+@@ -340,6 +341,7 @@ static void cfgLoadOrMigrate() {
+           s_cfg.ct_purge_days = TOUCH_CT_PURGE_DEFAULT_DAYS;
+         }
+         if (stored_version < 73) s_cfg.chats_unread_only = 0;   // v73 new trailing field: never stored before
++        if (stored_version < 74) s_cfg.wifi_off_batt = 0;       // v74 new trailing field: never stored before
+         if (stored_version < 29 && s_cfg.ui_scale == 0) s_cfg.ui_scale = 1;   // bump old 100% default -> Large (150%)
+         if (stored_version < 30) s_cfg.boot_advert = 0;   // #76 new trailing field: advert-on-boot off by default
+         // v51 new trailing field. Anything older than 51 never stored it, so it
+@@ -1571,6 +1573,17 @@ bool touchPrefsSetChatsUnreadOnly(bool on) {
+   s_cfg.chats_unread_only = on ? 1 : 0;
+   return cfgFlush();
+ }
++// Turn Wi-Fi off while on battery (v74). The user's radio toggle is kept; a
++// runtime hold in WifiRuntimeStore gates wifiConfigWantsWifi() instead.
++bool touchPrefsGetWifiOffOnBattery() {
++  if (!s_begun) touchPrefsBegin();
++  return s_cfg.wifi_off_batt != 0;
++}
++bool touchPrefsSetWifiOffOnBattery(bool on) {
++  if (!s_begun) touchPrefsBegin();
++  s_cfg.wifi_off_batt = on ? 1 : 0;
++  return cfgFlush();
++}
+ uint8_t touchPrefsGetNavPos() {
+   if (!s_begun) touchPrefsBegin();
+   return s_cfg.condense_nav <= TOUCH_NAV_LEFT ? s_cfg.condense_nav : TOUCH_NAV_BOTTOM;
+diff --git a/src/helpers/esp32/TouchPrefsStore.h b/src/helpers/esp32/TouchPrefsStore.h
+index 0b972d02..1c16b0a9 100644
+--- a/src/helpers/esp32/TouchPrefsStore.h
++++ b/src/helpers/esp32/TouchPrefsStore.h
+@@ -342,6 +342,12 @@ bool     touchPrefsSetContactPurgeDays(uint16_t days);
+ // messages, within the active All / Channels / Direct chip. Default off.
+ bool     touchPrefsGetChatsUnreadOnly();
+ bool     touchPrefsSetChatsUnreadOnly(bool on);
++
++// Turn Wi-Fi off while running on battery (no USB / charge source). Opt-in;
++// default off. Does not rewrite the Wi-Fi radio toggle — a runtime hold gates
++// wifiConfigWantsWifi() and clears when external power returns.
++bool     touchPrefsGetWifiOffOnBattery();
++bool     touchPrefsSetWifiOffOnBattery(bool on);
+ /** Where the navigation bar sits (Settings > Display > Navigation bar). Stored in the
+  *  v66 condense_nav byte, so no schema change: 0 bottom (the default) and 1 right (the
+  *  old Condense Nav rail) keep their meaning; 2 top and 3 left are new. Read once when
+diff --git a/src/helpers/esp32/WifiRuntimeStore.cpp b/src/helpers/esp32/WifiRuntimeStore.cpp
+index ed4389cb..1bceb5c7 100644
+--- a/src/helpers/esp32/WifiRuntimeStore.cpp
++++ b/src/helpers/esp32/WifiRuntimeStore.cpp
+@@ -22,6 +22,7 @@ static const char *WIFI_CONFIG_BLE_EN_KEY = "ble_en";   // BLE radio on/off (def
+ static SdNvsPrefs s_prefs;
+ static bool s_begun = false;
+ static volatile bool s_wifi_apply_requested = false;
++static volatile bool s_battery_hold = false;   // Wi-Fi off while on battery (pref); not NVS
+ #if defined(TLORA_PAGER)
+ static volatile PagerWifiBlePhase s_pager_wifi_ble_phase = PagerWifiBlePhase::Idle;
+ #endif
+@@ -186,6 +187,7 @@ void wifiConfigSetWifiChosen(bool chosen) {
+ bool wifiConfigWantsWifi() {
+   // Radio off -> BLE (or no transport). Radio on + creds -> Wi-Fi (classic).
+   if (!wifiConfigGetRadioEnabled()) return false;
++  if (s_battery_hold) return false;   // on battery with "Wi-Fi off on battery"
+   if (wifiConfigHasRuntime()) return true;
+ #ifdef HAS_TOUCH_UI
+   // Touch default: Wi-Fi is the primary transport. The radio-enabled pref is
+@@ -200,6 +202,14 @@ bool wifiConfigWantsWifi() {
+ #endif
+ }
+ 
++void wifiConfigSetBatteryHold(bool hold) {
++  if (s_battery_hold == hold) return;
++  s_battery_hold = hold;
++  s_wifi_apply_requested = true;
++}
++
++bool wifiConfigGetBatteryHold() { return s_battery_hold; }
++
+ void wifiConfigRequestApply() {
+   s_wifi_apply_requested = true;
+ }
+@@ -227,7 +237,7 @@ void wifiConfigApply() {
+          (int)wifiConfigGetRadioEnabled(), (int)wifiConfigHasRuntime(),
+          (int)WiFi.getMode(), (int)WiFi.status());
+ #endif
+-  if (!wifiConfigGetRadioEnabled()) {
++  if (!wifiConfigWantsWifi()) {
+     WiFi.disconnect(true);
+     delay(50);
+     WiFi.mode(WIFI_OFF);
+diff --git a/src/helpers/esp32/WifiRuntimeStore.h b/src/helpers/esp32/WifiRuntimeStore.h
+index 2cf34622..c2a29cfc 100644
+--- a/src/helpers/esp32/WifiRuntimeStore.h
++++ b/src/helpers/esp32/WifiRuntimeStore.h
+@@ -54,9 +54,16 @@ void wifiConfigSetWifiChosen(bool chosen);
+ /* Wi-Fi intent used at boot and in the main loop. True = bring Wi-Fi up (STA).
+  * Non-touch rule = radio enabled AND creds present. On touch builds, radio-on
+  * is enough to keep the STA scannable without credentials. Pager BLE ordering
+- * must use PagerWifiBlePhase rather than treating this intent as association. */
++ * must use PagerWifiBlePhase rather than treating this intent as association.
++ * Also false while a battery hold is active (see wifiConfigSetBatteryHold). */
+ bool wifiConfigWantsWifi();
+ 
++/* Runtime hold: while true, wifiConfigWantsWifi() is false even if the user's
++ * radio toggle is on. Used by "Wi-Fi off on battery" so unplugging does not
++ * rewrite the persisted radio_en pref. Changing the hold requests a re-apply. */
++void wifiConfigSetBatteryHold(bool hold);
++bool wifiConfigGetBatteryHold();
++
+ /* Request an immediate (re)apply of current Wi-Fi settings from the main loop.
+  * Use after changing SSID/PWD or after Set* writes from another task/context —
+  * avoids calling WiFi.disconnect/begin from an LVGL event handler. */
+diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
+--- a/src/ui-touch/UITask.cpp
++++ b/src/ui-touch/UITask.cpp
+@@ -3246,6 +3246,11 @@
+   updateGlobalStatusBar();
+ }
+ static const char* tsBlockReason();    // fwd decl (defined near idle-sleep hooks)
++static bool batteryOnExternalPower(uint16_t mv);   // fwd decl (battery helpers below)
++static uint16_t batteryMvSmoothed();
++#if defined(ESP32) && CAP_BATTERY
++static void wifiOffOnBatteryTick(bool announce);   // apply / clear the Wi-Fi battery hold
++#endif
+ static const char* tsWakeReasonStr(touchSleep::WakeReason r);  // fwd decl (defined near idle-sleep hooks)
+ static void batteryTapCb(lv_event_t* e);   // fwd decl (defined near the battery chart) — Settings "Battery" button reuses it
+ 
+@@ -21020,7 +21025,19 @@
+   touchSleep::setEnabled(on);
+   updateGlobalStatusBar();
+   if (g_lv.task) g_lv.task->showAlert(on ? TR("Battery saver on") : TR("Battery saver off"), 1200);
++}
++
++#if defined(ESP32) && CAP_BATTERY
++// Settings > Battery: turn the Wi-Fi modem off while on battery (idle power-save
++// already needs Wi-Fi off to park). The radio toggle is left alone; a runtime
++// hold gates wifiConfigWantsWifi() and clears when USB returns.
++static void wifiOffOnBatteryToggleCb(lv_event_t* e) {
++  if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) return;
++  const bool on = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
++  touchPrefsSetWifiOffOnBattery(on);
++  wifiOffOnBatteryTick(/*announce=*/true);
+ }
++#endif
+ 
+ // Hard-lock (not just dim) when the screen idles off, so the touchscreen is
+ // inert until a deliberate unlock. Cached in s_lock_on_screen_off so the loop's
+@@ -22998,6 +23015,13 @@
+                  false,
+ #endif
+                  sleepIdleToggleCb);
++#if defined(ESP32) && CAP_BATTERY
++    setSwitchRow(c, "Wi-Fi off on battery",
++                 "Turns the Wi-Fi modem off while you are unplugged (saves power; the Settings "
++                 "Wi-Fi switch stays as you left it). Plugging in USB brings Wi-Fi back. Turn this "
++                 "off if you need Wi-Fi away from a charger.",
++                 touchPrefsGetWifiOffOnBattery(), wifiOffOnBatteryToggleCb);
++#endif
+ #if defined(TLORA_PAGER)
+     // The percentage is the fuel gauge's own state of charge, not a voltage curve:
+     // nothing to calibrate (and "hold to reset" has no key equivalent here).
+@@ -63853,6 +63877,8 @@
+     const int re = wifiConfigGetRadioEnabled() ? 1 : 0;
+     if (!re) {
+       lv_label_set_text(g_set_sec_sub[SEC_WIFI], TR("Radio off"));
++    } else if (wifiConfigGetBatteryHold()) {
++      lv_label_set_text(g_set_sec_sub[SEC_WIFI], TR("Off on battery"));
+     } else if (WiFi.status() == WL_CONNECTED) {
+       IPAddress ip = WiFi.localIP();
+       lv_label_set_text_fmt(g_set_sec_sub[SEC_WIFI], "%s · %d.%d.%d.%d",
+@@ -63876,6 +63902,10 @@
+   if (g_set_modal.wifi_sta_status_l) {
+     if (!wifiConfigGetRadioEnabled()) {
+       lv_label_set_text(g_set_modal.wifi_sta_status_l, TR("Wi-Fi is off."));
++    } else if (wifiConfigGetBatteryHold()) {
++      lv_label_set_text(g_set_modal.wifi_sta_status_l,
++                       TR("Wi-Fi is off while on battery.\n"
++                          "Plug in USB, or turn off Settings → Battery → Wi-Fi off on battery."));
+     } else {
+       char line[160];
+       const int st = static_cast<int>(WiFi.status());
+@@ -68832,6 +68862,19 @@
+ static bool tsBleOff()     { return true; }   // Bluetooth on is fine (see tsWifiOff); a connected app is a client
+ // tsOnBattery: true when NOT on USB power (charging, or full and held by the charger).
+ static bool tsOnBattery()  { return !batteryOnExternalPower(batteryMvSmoothed()); }
++
++#if defined(ESP32) && CAP_BATTERY
++// Keep wifiConfig's battery hold in sync with power source + the Settings pref.
++// announce: toast when the hold newly engages / clears (Settings toggle path).
++static void wifiOffOnBatteryTick(bool announce) {
++  const bool want = touchPrefsGetWifiOffOnBattery() && tsOnBattery();
++  const bool was = wifiConfigGetBatteryHold();
++  wifiConfigSetBatteryHold(want);
++  if (!announce || !g_lv.task || want == was) return;
++  if (want) g_lv.task->showAlert(TR("Wi-Fi off on battery"), 1400);
++  else if (wifiConfigGetRadioEnabled()) g_lv.task->showAlert(TR("Wi-Fi back (USB power)"), 1400);
++}
++#endif
+ // tsMeshIdle: true when the radio is NOT mid-receive (preamble→RxDone race guarded),
+ // AND no outbound packet / retry / contact write is due now. Future retry and
+ // write deadlines are allowed to use the timed idle-power-saving path.
+@@ -92960,6 +93003,14 @@
+ 
+ void UITask::loop() {
+   unsigned long now = millis();
++#if defined(ESP32) && CAP_BATTERY
++  // ~1 Hz: engage / clear the Wi-Fi battery hold when power source changes.
++  { static uint32_t s_wifi_batt_next = 0;
++    if ((int32_t)(now - s_wifi_batt_next) >= 0) {
++      s_wifi_batt_next = now + 1000;
++      wifiOffOnBatteryTick(/*announce=*/true);
++    } }
++#endif
+ #if defined(HAS_TOUCH_UI)
+   tileWorkerKick();   // Pager: the net worker is a job; post it when there's work
+ #endif
