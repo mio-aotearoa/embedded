@@ -17,6 +17,7 @@
  */
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <string>
@@ -95,7 +96,16 @@ bool hasTitle(const std::vector<ZimEntry> &hits, const char *title)
 
 int main(void)
 {
-    const char *zimPath = "/tmp/host-test.zim";
+    // Prefer TMPDIR (set in Nix builds and often writable on locked-down macOS
+    // where /tmp itself is not); fall back to a relative path.
+    char zimPathBuf[256];
+    const char *tmpdir = getenv("TMPDIR");
+    if (tmpdir && tmpdir[0]) {
+        snprintf(zimPathBuf, sizeof(zimPathBuf), "%s/host-test.zim", tmpdir);
+    } else {
+        snprintf(zimPathBuf, sizeof(zimPathBuf), "host-test.zim");
+    }
+    const char *zimPath = zimPathBuf;
     std::vector<uint8_t> z;
 
     z.resize(80, 0); // header filled in later

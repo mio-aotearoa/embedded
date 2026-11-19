@@ -44,19 +44,35 @@
       systems = [
         "x86_64-linux"
         "aarch64-linux"
+        "aarch64-darwin"
+        "x86_64-darwin"
       ];
-      forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f (import nixpkgs { inherit system; }));
+      forAllSystems =
+        f:
+        nixpkgs.lib.genAttrs systems (
+          system:
+          f {
+            inherit system;
+            pkgs = import nixpkgs { inherit system; };
+          }
+        );
     in
     {
       packages = forAllSystems (
-        pkgs:
+        {
+          system,
+          pkgs,
+        }:
         let
+          # Prefer the C/C++ toolchain from stdenv so Darwin uses the clang
+          # that Nix wires for the platform; fall back to gcc/g++ names below.
+          cc = pkgs.stdenv.cc;
           hostTests = pkgs.stdenv.mkDerivation {
             pname = "tdeck-kiwix-host-tests";
             version = "0.1.0";
             src = ./.;
             nativeBuildInputs = [
-              pkgs.gcc
+              cc
               pkgs.gnumake
             ];
             dontConfigure = true;
@@ -65,21 +81,21 @@
               runHook preBuild
               mkdir -p build/obj
               for f in ${zstd}/lib/common/*.c ${zstd}/lib/decompress/*.c; do
-                gcc -O1 -DZSTD_DISABLE_ASM=1 \
+                $CC -O1 -DZSTD_DISABLE_ASM=1 \
                   -I${zstd}/lib -I${zstd}/lib/common \
                   -c "$f" -o "build/obj/$(basename "$f" .c).o"
               done
-              g++ -std=gnu++17 -O1 -Wall -Wextra \
+              $CXX -std=gnu++17 -O1 -Wall -Wextra \
                 -I firmware/tdeck-plus/kiwix -I ${zstd}/lib \
                 firmware/tdeck-plus/test/host/test_zim_archive.cpp \
                 firmware/tdeck-plus/kiwix/zim_reader.cpp \
                 build/obj/*.o -o build/test_zim_archive
               ./build/test_zim_archive
-              gcc -std=c11 -O1 -Wall -Wextra \
+              $CC -std=c11 -O1 -Wall -Wextra \
                 -I firmware/reterminal-e1002/companion \
                 -c firmware/reterminal-e1002/companion/airdrop_companion.c \
                 -o build/obj/airdrop_companion.o
-              g++ -std=gnu++17 -O1 -Wall -Wextra \
+              $CXX -std=gnu++17 -O1 -Wall -Wextra \
                 -I firmware/reterminal-e1002/companion \
                 firmware/reterminal-e1002/companion/test/test_airdrop_companion.cpp \
                 build/obj/airdrop_companion.o -o build/test_airdrop_companion
@@ -89,7 +105,7 @@
                 echo "error: duktape.c not found in the pinned Duktape input" >&2
                 exit 1
               fi
-              g++ -std=gnu++17 -O1 -Wall -Wextra \
+              $CXX -std=gnu++17 -O1 -Wall -Wextra \
                 -I firmware/tdeck-plus/browser -I "$(dirname "$DUK")" \
                 firmware/tdeck-plus/test/host/test_browser_js.cpp \
                 firmware/tdeck-plus/browser/js_engine.cpp \
@@ -106,7 +122,7 @@
             meta = with pkgs.lib; {
               description = "T-Deck host tests: ZIM parser, browser JS, AirDrop (hermetic)";
               license = licenses.gpl3Plus;
-              platforms = platforms.linux;
+              platforms = platforms.unix;
             };
           };
 
@@ -120,6 +136,8 @@
               pkgs.cacert
               pkgs.curl
               pkgs.which
+              pkgs.coreutils
+              pkgs.findutils
             ];
             text = ''
               # Run from the repository checkout, not from the store copy: the
@@ -152,7 +170,7 @@
             meta = with pkgs.lib; {
               description = "Build the T-Deck Plus firmware (wadamesh + Kiwix)";
               license = licenses.gpl3Plus;
-              platforms = platforms.linux;
+              platforms = platforms.unix;
             };
           };
         in
@@ -163,37 +181,63 @@
         }
       );
 
-      apps = forAllSystems (pkgs: {
-        firmware = {
-          type = "app";
-          program = "${self.packages.${pkgs.system}.tdeck-builder}/bin/tdeck-build";
-        };
-        default = self.apps.${pkgs.system}.firmware;
-      });
+      apps = forAllSystems (
+        {
+          system,
+          pkgs,
+        }:
+        {
+          firmware = {
+            type = "app";
+            program = "${self.packages.${system}.tdeck-builder}/bin/tdeck-build";
+          };
+          default = self.apps.${system}.firmware;
+        }
+      );
 
-      devShells = forAllSystems (pkgs: {
-        default = pkgs.mkShell {
-          packages = [
-            pkgs.platformio
-            pkgs.git
-            pkgs.python3
-            pkgs.gnumake
-            pkgs.cacert
-          ];
-          PLATFORMIO_CORE_DIR = "$PWD/.platformio";
-          shellHook = ''
-            export SSL_CERT_FILE="${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
-            echo "T-Deck Plus: ./scripts/patches.sh apply wadamesh && firmware/tdeck-plus/build.sh"
-            echo "PlatformIO core dir: $PLATFORMIO_CORE_DIR"
-          '';
-        };
-      });
+      devShells = forAllSystems (
+        {
+          system,
+          pkgs,
+        }:
+        {
+          default = pkgs.mkShell {
+            packages = [
+              pkgs.platformio
+              pkgs.git
+              pkgs.python3
+              pkgs.gnumake
+              pkgs.cacert
+              pkgs.coreutils
+              pkgs.findutils
+              pkgs.curl
+              pkgs.which
+              # E1002 asset generation / flashing helpers. ESP-IDF itself is
+              # still installed outside Nix (see firmware/reterminal-e1002/README.md).
+              pkgs.nodejs
+              pkgs.esptool
+              pkgs.cmake
+              pkgs.ninja
+            ];
+            PLATFORMIO_CORE_DIR = "$PWD/.platformio";
+            shellHook = ''
+              export SSL_CERT_FILE="${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+              echo "T-Deck Plus: nix run .#firmware   or   firmware/tdeck-plus/build.sh"
+              echo "E1002: source \$IDF_PATH/export.sh && firmware/reterminal-e1002/build.sh"
+              echo "PlatformIO core dir: $PLATFORMIO_CORE_DIR"
+            '';
+          };
+        }
+      );
 
-      checks = forAllSystems (pkgs: {
-        host-tests = self.packages.${pkgs.system}.host-tests;
-      });
+      checks = forAllSystems (
+        { system, ... }:
+        {
+          host-tests = self.packages.${system}.host-tests;
+        }
+      );
 
-      formatter = forAllSystems (pkgs: pkgs.nixfmt);
+      formatter = forAllSystems ({ pkgs, ... }: pkgs.nixfmt);
 
     };
 }

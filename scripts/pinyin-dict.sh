@@ -30,5 +30,12 @@ g++ -std=c++17 -O2 -I"$eng/include" -I"$eng/port" -o "$tmp/dictbuilder" \
 
 "$tmp/dictbuilder" "$raw" "$hzs" "$out" >/dev/null
 
-printf 'dictionary: %s (%s bytes)\n' "$out" "$(stat -c%s "$out")"
+if size="$(stat -c%s "$out" 2>/dev/null)"; then
+    :
+elif size="$(stat -f%z "$out" 2>/dev/null)"; then
+    :
+else
+    size="$(wc -c < "$out" | tr -d ' ')"
+fi
+printf 'dictionary: %s (%s bytes)\n' "$out" "$size"
 printf 'copy it to the card as /sd/ime/dict_pinyin.dat\n'

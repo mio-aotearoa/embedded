@@ -440,12 +440,20 @@ void BrowserApp::fetchTask(void *)
         code = http.GET();
         if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308)
         {
-            String loc = http.header("Location");
+            const String loc = http.getLocation();
             http.end();
             if (!loc.length() || hop == 4)
             {
                 snprintf(f.err, sizeof f.err, "%s",
                          loc.length() ? "Too many redirects" : "Redirect without a Location");
+                f.running = false;
+                f.done = true;
+                vTaskDelete(nullptr);
+                return;
+            }
+            if (loc.length() >= sizeof current)
+            {
+                snprintf(f.err, sizeof f.err, "%s", "Redirect URL too long");
                 f.running = false;
                 f.done = true;
                 vTaskDelete(nullptr);
@@ -637,6 +645,7 @@ bool browserRenderInto(lv_obj_t* parent, const char* url, const char* html, size
     const size_t docLen = scripted ? scriptedLen : len;
 
     s_into_link_cb = on_link;
+    const bool had_scripts = scripted != nullptr;
     const RenderResult result = tactilebrowser_render_html_string(
         url ? url : "", doc, docLen, parent, lv_obj_get_width(parent), 4000);
     free(scripted);
@@ -648,5 +657,9 @@ bool browserRenderInto(lv_obj_t* parent, const char* url, const char* html, size
         case RENDER_ERROR_NETWORK:s_render_error = "network"; break;
         default:                  s_render_error = "no body"; break;
     }
+    Serial.printf("[browser] render %s url='%s' bytes=%u scripts=%s -> %s\n",
+                  result == RENDER_SUCCESS ? "html" : "fail",
+                  url ? url : "", (unsigned)docLen,
+                  had_scripts ? "yes" : "no", s_render_error);
     return result == RENDER_SUCCESS;
 }

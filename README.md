@@ -120,7 +120,8 @@ runs — refuses to build if that submodule is not the wadamesh checkout, applie
 
 Prerequisites: the submodules, and network access on the first build, because
 PlatformIO downloads the espressif32 platform, the Xtensa toolchain and
-wadamesh's `lib_deps` into `.platformio/`.
+wadamesh's `lib_deps` into `.platformio/`. Supported Nix systems:
+`x86_64-linux`, `aarch64-linux`, `aarch64-darwin`, and `x86_64-darwin`.
 
 ```bash
 git submodule update --init --recursive
@@ -185,9 +186,13 @@ repository's own code is GPL-3.0 (see `LICENSE`).
 
 ## Building the reTerminal E1002 firmware
 
-With ESP-IDF 6.0 activated:
+With ESP-IDF 6.0 activated (install separately; works on aarch64-darwin with
+Espressif’s macOS toolchain). `nix develop` provides Node.js, CMake, Ninja and
+esptool for asset generation and flashing:
 
 ```bash
+nix develop -c bash -lc '. "$IDF_PATH/export.sh" && firmware/reterminal-e1002/build.sh'
+# or, with IDF already on PATH:
 firmware/reterminal-e1002/build.sh   # builds switch and coex
 ```
 

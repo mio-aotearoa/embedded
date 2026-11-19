@@ -17,7 +17,7 @@ certificate store.
 
 **Can the Reader do CSS or JS? Yes — since the merge, the renderer does layout and
 inline scripts; the text pass is only the fallback.** Fetched pages and local HTML
-up to 128 KB go to our Lexbor renderer first. A page it cannot lay out, or a
+up to 512 KB go to our Lexbor renderer first. A page it cannot lay out, or a
 document bigger than that buffer, falls back to `ReaderContent::htmlToText`
 (`src/ui-touch/ReaderContent.cpp`): one tag-stripping pass that skips the body of
 every `<script>` and `<style>` element, drops all other tags, decodes entities,
@@ -173,7 +173,7 @@ DOM milestone the current page still lacks.
 ## What was chosen
 
 1. **The Reader is "the browser"**, with TactileBrowser's core merged into it:
-   fetched pages and local `.htm`/`.html` files up to 128 KB are laid out with
+   fetched pages and local `.htm`/`.html` files up to 512 KB are laid out with
    Lexbor; the text pass is the fallback. One Web tile, one fetch path.
 2. **TactileBrowser's core was extracted, not the project.** Its
    `RenderInterface` needed only an LVGL 8.3 renderer, an HTTP(S) fetcher and a

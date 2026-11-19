@@ -244,7 +244,7 @@ Two properties are deliberate:
 
 ### Deliberately out of scope (today)
 
-* Images and math: the renderer decodes neither. Articles up to 128 KB get CSS
+* Images and math: the renderer decodes neither. Articles up to 512 KB get CSS
   and box layout; larger ones fall back to the Reader's text pass, which drops
   CSS, tables and images.
 * Full-text search: only the ZIM title index is searched (prefix match).

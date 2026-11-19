@@ -23,7 +23,8 @@
 namespace
 {
 constexpr uint32_t kBg = 0x101418;
-constexpr const char *kSdMount = "/sd";
+// SD.open/mkdir paths are relative to the card root (same as Download/Kiwix).
+// Do not prefix /sd — that VFS mount is only for stdio/fopen callers.
 constexpr const char *kDir = "/esp32ai/tinystories";
 
 struct ModelFile
@@ -44,7 +45,7 @@ constexpr int kFileCount = (int)(sizeof(kFiles) / sizeof(kFiles[0]));
 
 void sdPath(char *out, size_t cap, const char *name)
 {
-    snprintf(out, cap, "%s%s/%s", kSdMount, kDir, name);
+    snprintf(out, cap, "%s/%s", kDir, name);
 }
 
 bool fileSize(const char *path, uint64_t &size)

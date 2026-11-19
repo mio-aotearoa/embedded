@@ -26,7 +26,8 @@ projects() {
     if [ "$#" -gt 0 ]; then
         printf '%s\n' "$@"
     else
-        find "$PATCH_ROOT" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort
+        # Portable across GNU and BSD find (no -printf).
+        find "$PATCH_ROOT" -mindepth 1 -maxdepth 1 -type d | sed 's|.*/||' | sort
     fi
 }
 

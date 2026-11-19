@@ -201,7 +201,7 @@ index 1f84c418..56416df7 100644
 +static char*  s_reader_html = nullptr;     // last fetched page, kept for the renderer
 +static size_t s_reader_html_len = 0;
 +static size_t s_reader_html_skip = 0;   // page size when the markup did not fit the cap
-+static constexpr size_t kReaderHtmlCap = 128 * 1024;   // Lexbor buffer: one fetched or local HTML page
++static constexpr size_t kReaderHtmlCap = 512 * 1024;   // Lexbor buffer: one fetched or local HTML page
 +static void readerRendererLinkCb(const char* href) { if (href && href[0]) readerStart(href); }
 +#endif
  static lv_obj_t*     s_reader_go     = nullptr;
@@ -662,3 +662,26 @@ index 67241b5c..1fa50290 100644
    #define CAP_LOCK_SCREEN  1
  
  #elif defined(HAS_RAK_TAP_V2)         // ===== RAK WisMesh Tap V2 (ESP32-S3) =====
+diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
+--- a/src/ui-touch/UITask.cpp
++++ b/src/ui-touch/UITask.cpp
+@@ -3231,6 +3231,8 @@ volatile bool g_usb_files_owns_serial = false;
+ static volatile uint32_t g_sd_io_ms = 0;
+ static inline void markSdIo() { const uint32_t t = millis(); g_sd_io_ms = t ? t : 1; }
++// Firmware helpers outside this TU (http_download.cpp) light the same LED.
++extern "C" void meshcomodMarkSdIo(void) { markSdIo(); }
+ 
+ // Async mesh-request activity: a small spinner glyph in the status bar while a
+ // request is sending or awaiting a reply. markMeshRequest() stamps a send; the
+ // indicator also stays lit while a UI reply is pending (s_ui_ping_deadline_ms,
+diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
+--- a/src/ui-touch/UITask.cpp
++++ b/src/ui-touch/UITask.cpp
+@@ -34263,6 +34263,6 @@
+ static TaskHandle_t  s_reader_task    = nullptr;
+ static bool          s_reader_pristine = false;    // URL field still holds the untouched default
+-static const size_t  kReaderRawCap  = 192 * 1024;  // max raw HTML we buffer (PSRAM)
++static const size_t  kReaderRawCap  = 512 * 1024;  // max raw HTML we buffer (PSRAM); matches kReaderHtmlCap
+ static const size_t  kReaderTextCap =  60 * 1024;  // max extracted text we keep
+ // Links found on the page: byte range in s_reader_text + resolved absolute href.
+ using ReaderLink = ReaderContent::Link;

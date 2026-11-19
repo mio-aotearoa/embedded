@@ -31,11 +31,24 @@ if [ ! -f "$CACHE" ]; then
     mv "$CACHE.part" "$CACHE"
 fi
 
-echo "$SHA256  $CACHE" | sha256sum -c --status - || {
-    echo "error: $CACHE does not match the pinned SHA-256" >&2
-    rm -f "$CACHE"
+# Prefer sha256sum (Linux / newer macOS); fall back to shasum -a 256 (BSD).
+if command -v sha256sum >/dev/null 2>&1; then
+    echo "$SHA256  $CACHE" | sha256sum -c --status - || {
+        echo "error: $CACHE does not match the pinned SHA-256" >&2
+        rm -f "$CACHE"
+        exit 1
+    }
+elif command -v shasum >/dev/null 2>&1; then
+    actual="$(shasum -a 256 "$CACHE" | awk '{print $1}')"
+    if [ "$actual" != "$SHA256" ]; then
+        echo "error: $CACHE does not match the pinned SHA-256" >&2
+        rm -f "$CACHE"
+        exit 1
+    fi
+else
+    echo "error: need sha256sum or shasum to verify duktape tarball" >&2
     exit 1
-}
+fi
 
 mkdir -p "$OUT"
 tar -xJf "$CACHE" -C "$OUT" --strip-components=2 \

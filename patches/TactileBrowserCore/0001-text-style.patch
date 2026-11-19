@@ -12,12 +12,6 @@ index 78f5d8d..30399c0 100644
  } RenderInterface;
  
  // Actual Renderer struct definition
-diff --git a/tactilebrowser_core/lexbor b/tactilebrowser_core/lexbor
---- a/tactilebrowser_core/lexbor
-+++ b/tactilebrowser_core/lexbor
-@@ -1 +1 @@
--Subproject commit 12e57140568207603e951f09005a5f9918acb432
-+Subproject commit 12e57140568207603e951f09005a5f9918acb432-dirty
 diff --git a/tactilebrowser_core/src/layout_engine.cpp b/tactilebrowser_core/src/layout_engine.cpp
 index c5f3008..e9bc68b 100644
 --- a/tactilebrowser_core/src/layout_engine.cpp

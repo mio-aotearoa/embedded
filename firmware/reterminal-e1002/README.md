@@ -14,10 +14,14 @@ One AirDrop window is supported per boot; TLS allocations remain until reboot.
 
 Requires ESP-IDF 6.0, Node.js/npm and upstream splash dependencies. Both
 variants were compiled and linked with **ESP-IDF 6.0.3**
-(`c6c28ec49071929fe0a48a258ce16f67b70863b8`), GCC 15.3.0.
+(`c6c28ec49071929fe0a48a258ce16f67b70863b8`), GCC 15.3.0. On macOS (including
+Apple Silicon), install ESP-IDF with the [Espressif macOS
+instructions](https://docs.espressif.com/projects/esp-idf/en/v6.0/esp32s3/get-started/linux-macos-setup.html);
+`nix develop` supplies Node.js, CMake, Ninja and esptool.
 
 ```bash
 git submodule update --init --recursive
+nix develop   # optional: Node/CMake/Ninja/esptool from the flake
 . "$IDF_PATH/export.sh"
 ./firmware/reterminal-e1002/build.sh          # both variants
 ./firmware/reterminal-e1002/build.sh switch   # one variant
