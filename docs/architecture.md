@@ -269,8 +269,8 @@ photoframe's display pipeline for the IDF images. The Arduino shim is in
 * **`coex`** — channel-6 2.4 GHz dual-protocol RX experiment on Espressif's
   closed MAC (STA/HTTP stay up; AWDL attached via APSTA). Needs a ch6 router.
 * **`open`** — FoA open MAC (`firmware/reterminal-e1002-open/`): concurrent
-  `foa_sta` + `foa_awdl` VIFs. Classic ESP32 lab/companion until FoA supports
-  S3; companion frames can feed photoframe later.
+  `foa_sta` + `foa_awdl` VIFs on ESP32-S3 (in-tree `patches/esp-wifi-hal` +
+  `patches/FoA`); companion UART frames can feed photoframe later.
 
 `patches/ESP32Drop/` adds APSTA radio ownership, listener shutdown and Mbed TLS 4
 compatibility. `patches/esp32-photoframe/` adds variant hooks, HTTP mutation
@@ -399,7 +399,7 @@ so this repository does not claim a speed-up: measure with the existing
 The T-Deck Plus image is compiled and linked with the pinned toolchain
 (PlatformIO/espressif32 6.11.0, `LilyGo_TDeck_companion_radio_touch`). E1002
 `switch`/`coex` compile and link with ESP-IDF 6.0.3 / GCC 15.3.0; `open` is the
-separate FoA Rust image (ESP32).
+separate FoA Rust image (ESP32-S3, patched FoA / esp-wifi-hal).
 Nothing has been flashed or run on hardware. What was actually checked:
 
 * `scripts/patches.sh apply|status|revert` round-trips both series against the

@@ -1,0 +1,99 @@
+diff --git a/examples/Cargo.toml b/examples/Cargo.toml
+index 03d2f81..51aa760 100644
+--- a/examples/Cargo.toml
++++ b/examples/Cargo.toml
+@@ -69,3 +69,13 @@ esp32s2 = [
+     "foa_sta/esp32s2",
+     "foa_awdl/esp32s2",
+ ]
++esp32s3 = [
++    "esp-hal/esp32s3",
++    "esp-rtos/esp32s3",
++    "esp-println/esp32s3",
++    "esp-bootloader-esp-idf/esp32s3",
++    "esp-backtrace/esp32s3",
++    "foa/esp32s3",
++    "foa_sta/esp32s3",
++    "foa_awdl/esp32s3",
++]
+diff --git a/foa/Cargo.toml b/foa/Cargo.toml
+index be3df6a..b60bc1f 100644
+--- a/foa/Cargo.toml
++++ b/foa/Cargo.toml
+@@ -17,7 +17,7 @@ embassy-time = { workspace = true }
+ esp-hal = { workspace = true }
+ esp-config = { workspace = true }
+ 
+-esp-wifi-hal = "0.3.1"
++esp-wifi-hal = { path = "../../esp-wifi-hal/esp-wifi-hal", version = "0.3.3" }
+ static_cell = "2.1.1"
+ critical-section = "1.2.0"
+ portable-atomic = { workspace = true }
+@@ -45,3 +45,4 @@ defmt = [
+ 
+ esp32 = ["esp-hal/esp32", "esp-wifi-hal/esp32"]
+ esp32s2 = ["esp-hal/esp32s2", "esp-wifi-hal/esp32s2"]
++esp32s3 = ["esp-hal/esp32s3", "esp-wifi-hal/esp32s3"]
+diff --git a/foa_awdl/Cargo.toml b/foa_awdl/Cargo.toml
+index 783b718..3c601f5 100644
+--- a/foa_awdl/Cargo.toml
++++ b/foa_awdl/Cargo.toml
+@@ -34,6 +34,7 @@ esp-config = { workspace = true, features = ["build"] }
+ alloc = []
+ esp32 = ["foa/esp32"]
+ esp32s2 = ["foa/esp32s2"]
++esp32s3 = ["foa/esp32s3"]
+ 
+ defmt = ["dep:defmt", "defmt-or-log/defmt", "ieee80211/defmt", "foa/defmt"]
+ log = ["dep:log", "foa/log", "defmt-or-log/log"]
+diff --git a/foa_awdl/src/peer.rs b/foa_awdl/src/peer.rs
+index ee98f7d..3446a70 100644
+--- a/foa_awdl/src/peer.rs
++++ b/foa_awdl/src/peer.rs
+@@ -433,7 +433,7 @@ impl AwdlPeer {
+             if self.synchronization_state.channel_sequence != synchronization_state.channel_sequence
+             {
+                 debug!(
+-                    "Peer {} changed it's channel sequence. {} -> {}.",
++                    "Peer {} changed it's channel sequence. {:?} -> {:?}.",
+                     MACAddress(*transmitter),
+                     self.synchronization_state.channel_sequence,
+                     synchronization_state.channel_sequence
+diff --git a/foa_awdl/src/runner/rx.rs b/foa_awdl/src/runner/rx.rs
+index 29abe52..c9f1709 100644
+--- a/foa_awdl/src/runner/rx.rs
++++ b/foa_awdl/src/runner/rx.rs
+@@ -62,7 +62,7 @@ impl AwdlMpduRxRunner<'_, '_> {
+                             AwdlPeer::new_with_action_frame(&awdl_action_body, rx_timestamp)
+                                 .inspect(|peer| {
+                                     debug!(
+-                        "Adding peer {} to cache. Channel Sequence: {}, TSF Epoch: {}s ago.",
++                        "Adding peer {} to cache. Channel Sequence: {:?}, TSF Epoch: {}s ago.",
+                         MACAddress(*transmitter),
+                         peer.synchronization_state.channel_sequence,
+                         peer.synchronization_state
+diff --git a/foa_awdl/src/state.rs b/foa_awdl/src/state.rs
+index d110cc7..871ca10 100644
+--- a/foa_awdl/src/state.rs
++++ b/foa_awdl/src/state.rs
+@@ -135,7 +135,7 @@ impl CommonResources {
+                 // If the master is new, we log the stats.
+                 if self_election_state.sync_peer != Some(master_address) {
+                     debug!(
+-                        "Adopting {} as master. Metric: {} Counter: {} Hop Count: {}",
++                        "Adopting {:?} as master. Metric: {} Counter: {:?} Hop Count: {}",
+                         master_address,
+                         master_election_state.self_metric,
+                         master_election_state.self_counter,
+diff --git a/foa_sta/Cargo.toml b/foa_sta/Cargo.toml
+index 4d62d85..a8d0504 100644
+--- a/foa_sta/Cargo.toml
++++ b/foa_sta/Cargo.toml
+@@ -44,6 +44,7 @@ alloc = []
+ 
+ esp32 = ["foa/esp32", "esp-hal/esp32"]
+ esp32s2 = ["foa/esp32s2", "esp-hal/esp32s2"]
++esp32s3 = ["foa/esp32s3", "esp-hal/esp32s3"]
+ 
+ log = ["dep:log", "foa/log", "defmt-or-log/log"]
+ defmt = ["dep:defmt", "defmt-or-log/defmt", "foa/defmt", "ieee80211/defmt"]

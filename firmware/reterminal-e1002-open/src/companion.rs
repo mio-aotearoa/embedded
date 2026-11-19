@@ -1,10 +1,8 @@
-//! Companion frame codec (Rust side) matching
-//! `firmware/reterminal-e1002/companion/airdrop_companion.h`.
+//! Companion frame codec matching
+//! `firmware/reterminal-e1002/companion/airdrop_companion.{h,c}`.
 //!
-//! The open FoA image can emit these frames over UART later so an E1002
-//! photoframe keeps display/storage while this radio owns concurrent STA+AWDL.
-
-#![allow(dead_code)]
+//! The open FoA image transmits these frames on UART1 so an E1002 photoframe
+//! (or a host) can consume AWDL/AirDrop session signals over a second link.
 
 pub const AC_MAX_PAYLOAD: usize = 512;
 pub const AC_MSG_READY: u8 = 0x01;
@@ -59,11 +57,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ready_frame_roundtrip_len() {
+    fn ready_frame_matches_c_layout() {
         let mut out = [0u8; 16];
         let n = encode(AC_MSG_READY, 0, &[], &mut out).unwrap();
         assert_eq!(n, 8);
         assert_eq!(&out[..2], &[SOF0, SOF1]);
         assert_eq!(out[2], AC_MSG_READY);
+        assert_eq!(out[3], 0);
+        assert_eq!(&out[4..6], &[0, 0]);
+        let crc = crc16_ccitt_false(&out[2..6]);
+        assert_eq!(out[6], (crc >> 8) as u8);
+        assert_eq!(out[7], (crc & 0xff) as u8);
+    }
+
+    #[test]
+    fn session_open_carries_img_id() {
+        let mut out = [0u8; 32];
+        let n = encode(AC_MSG_SESSION_OPEN, 3, &[0x2a], &mut out).unwrap();
+        assert_eq!(n, 9);
+        assert_eq!(out[2], AC_MSG_SESSION_OPEN);
+        assert_eq!(out[3], 3);
+        assert_eq!(out[6], 0x2a);
     }
 }

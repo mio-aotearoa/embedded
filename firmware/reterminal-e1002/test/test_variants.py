@@ -49,7 +49,9 @@ class Variants(unittest.TestCase):
             cmd = build.open_cargo_cmd(tmp)
             self.assertEqual(cmd[0], "cargo")
             self.assertIn("--release", cmd)
-            self.assertIn("esp32", cmd)
+            self.assertTrue(any("esp32s3" in str(c) for c in cmd))
+            self.assertTrue(any("firmware" in str(c) for c in cmd))
+            self.assertEqual(build.OPEN_TARGET, "xtensa-esp32s3-none-elf")
             self.assertIn(build.OPEN_TARGET, cmd)
             out = Path(tmp).resolve() / "e1002-open" / "cargo-target"
             self.assertIn(str(out), cmd)
@@ -59,6 +61,11 @@ class Variants(unittest.TestCase):
             self.assertIn("foa_sta", main)
             self.assertIn("foa_awdl", main)
             self.assertIn("AWDL_CHANNEL", main)
+            # Not a heartbeat-only stub: real association/scan + companion UART TX.
+            self.assertIn("connect_by_ssid", main)
+            self.assertIn("scan_continuously", main)
+            self.assertIn("companion_uart_task", main)
+            self.assertIn("AwdlEvent", main)
 
     def test_radio_ownership_and_channel_guard(self):
         source = patched_source("ESP32Drop", "ESP32Drop/src/awdl/port/awdl_port_esp32.cpp")

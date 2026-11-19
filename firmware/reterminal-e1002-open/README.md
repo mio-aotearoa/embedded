@@ -1,7 +1,7 @@
 # E1002 open firmware (FoA concurrent STA + AWDL)
 
 Faithful **concurrent Wi‑Fi + AWDL** on an open MAC
-([Ferris-on-Air](https://github.com/esp32-open-mac/FoA)): `foa_sta` and
+([Ferris-on-Air](https://github.com/esp32-open-mac/FoA)): real `foa_sta` and
 `foa_awdl` virtual interfaces share one radio through FoA’s LMAC.
 
 This is firmware **#3** in the E1002 build matrix:
@@ -12,50 +12,52 @@ This is firmware **#3** in the E1002 build matrix:
 | `coex` | IDF photoframe + Espressif APSTA | ch6 dual-protocol **RX experiment** on the closed blob |
 | **`open`** | FoA + foa_sta + foa_awdl | Concurrent STA + AWDL on an **open** MAC |
 
+## What runs (not stubs)
+
+* FoA LMAC bring-up with two VIFs
+* **AWDL**: `start()` on channel 6, peer/service event loop, IPv6 link-local logged
+* **STA**: `connect_by_ssid` + DHCP when `SSID`/`PASSWORD` are set at build time; otherwise continuous BSS scan so STA RX is exercised beside AWDL
+* **Companion UART1 TX (GPIO17)**: real `AC_MSG_READY` at boot and `AC_MSG_SESSION_OPEN` when an AirDrop service is discovered (same frame codec as `firmware/reterminal-e1002/companion/`)
+
+AirDrop **app-layer** (CPIO archive / TLS Everyone transfer) is still ESP32Drop’s
+job on `switch`/`coex`, or a future OpenDrop-shaped stack on FoA. This image is
+the open-MAC concurrent **link** path.
+
 ## Chip target
 
-FoA today supports **ESP32 / ESP32-S2**, not ESP32-S3. The reTerminal E1002 is
-S3, so this image is a **lab / companion-radio** build for classic ESP32 until
-FoA adds S3. The companion frame codec in `src/companion.rs` matches
-`firmware/reterminal-e1002/companion/` for a future UART link into photoframe.
+**ESP32-S3** (reTerminal E1002). Upstream FoA / `esp-wifi-hal` only list ESP32
+and ESP32-S2; this repo patches both for S3 (`patches/esp-wifi-hal`,
+`patches/FoA`) by treating the S3 Wi‑Fi MAC like the S2 map at `0x6003_3000`
+and enabling clocks via `APB_CTRL`.
 
 ## Build
 
 ```bash
-# From repo root (also builds switch+coex when you pass all):
-./firmware/reterminal-e1002/build.sh open
+# From repo root (applies FoA / esp-wifi-hal patches):
+SSID='your-ch6-ap' PASSWORD='secret' ./firmware/reterminal-e1002/build.sh open
 
-# Or cargo directly:
+# Or:
+./scripts/patches.sh apply esp-wifi-hal FoA
 cd firmware/reterminal-e1002-open
-cargo build --release --features esp32
+SSID='your-ch6-ap' PASSWORD='secret' \
+  cargo build --release --features firmware,esp32s3 --target xtensa-esp32s3-none-elf
 ```
 
 Requires the [Rust esp toolchain](https://esp-rs.github.io/book/installation/index.html)
-(`rustup toolchain install esp`) and, for a flashable `firmware.bin`,
-[`espflash`](https://github.com/esp-rs/espflash).
+and, for a flashable `firmware.bin`, [`espflash`](https://github.com/esp-rs/espflash).
+On NixOS/nix-darwin you can fetch the installer with `nix shell nixpkgs#espup
+nixpkgs#rustup` then `espup install -t esp32s3` and `. ~/export-esp.sh`.
 
-Artifacts land in `build/e1002-open/` (`e1002-open.elf`, optional `firmware.bin`,
-`firmware-manifest.json`).
+Host check for the companion codec (no esp toolchain):
 
-Flash:
+```bash
+cd firmware/reterminal-e1002-open && cargo test --lib
+```
+
+Artifacts: `build/e1002-open/` (`e1002-open.elf`, optional `firmware.bin`).
 
 ```bash
 espflash flash build/e1002-open/e1002-open.elf
 ```
 
-## What this cut does / does not
-
-**Does:** bring up FoA LMAC, attach STA + AWDL VIFs, start AWDL, log a dual-protocol
-heartbeat, encode companion READY frames.
-
-**Does not:** full AirDrop CPIO/TLS (app layer), photoframe display, ESP32-S3,
-or automatic STA association (set `SSID` / `PASSWORD` in `.cargo/config.toml`
-when you extend the STA path).
-
-Prefer a **2.4 GHz AP on channel 6** when testing STA + AWDL together — that is
-the only AWDL channel on 2.4 GHz.
-
-## License
-
-MIT OR Apache-2.0 (matches FoA). Linking FoA into a product with GPL photoframe
-is via the companion split, not a single binary.
+Use a **2.4 GHz AP on channel 6** when associating STA alongside AWDL.

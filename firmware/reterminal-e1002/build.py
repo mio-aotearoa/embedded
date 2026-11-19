@@ -4,7 +4,7 @@
 Three firmwares:
   switch — photoframe + exclusive ESP32Drop (IDF)
   coex   — photoframe + Espressif APSTA ch6 dual-protocol experiment (IDF)
-  open   — FoA open-MAC concurrent STA + AWDL (Rust/embassy, ESP32)
+  open   — FoA open-MAC concurrent STA + AWDL (Rust/embassy, ESP32-S3)
 
 `all` builds every variant. IDF variants need ESP-IDF 6 + npm; open needs the
 Rust esp toolchain (see firmware/reterminal-e1002-open/README.md).
@@ -42,7 +42,7 @@ REQUIRED_ASSETS = [
     "main/splash_data/setup_complete.epdgz",
     "main/splash_data/splash_meta.h",
 ]
-OPEN_TARGET = "xtensa-esp32-none-elf"
+OPEN_TARGET = "xtensa-esp32s3-none-elf"
 OPEN_BIN_NAME = "e1002-open"
 
 
@@ -125,7 +125,7 @@ def open_cargo_cmd(build_dir):
         "cargo",
         "build",
         "--release",
-        "--features", "esp32",
+        "--features", "firmware,esp32s3",
         "--target", OPEN_TARGET,
         "--target-dir", str(out / "cargo-target"),
     ]
@@ -139,6 +139,8 @@ def build_open(build_dir):
             "cargo not found; install the Rust esp toolchain "
             "(see firmware/reterminal-e1002-open/README.md)"
         )
+    # ESP32-S3 support lives in local FoA / esp-wifi-hal patches.
+    run([ROOT / "scripts" / "patches.sh", "apply", "esp-wifi-hal", "FoA"])
 
     out = Path(build_dir).resolve() / "e1002-open"
     out.mkdir(parents=True, exist_ok=True)
@@ -154,13 +156,13 @@ def build_open(build_dir):
     firmware_bin = out / "firmware.bin"
     artifacts = [elf_out]
     if shutil.which("espflash"):
-        run(["espflash", "save-image", "ESP32", str(elf), str(firmware_bin)])
+        run(["espflash", "save-image", "ESP32-S3", str(elf), str(firmware_bin)])
         artifacts.append(firmware_bin)
     else:
         print("note: espflash not found; packaged ELF only "
               "(flash with: espflash flash e1002-open.elf)", flush=True)
 
-    write_manifest("open", "esp32-foa-lab", "0x0", out, artifacts, chip="esp32")
+    write_manifest("open", BOARD, "0x0", out, artifacts, chip="esp32s3")
     return elf_out
 
 
@@ -203,7 +205,7 @@ def main():
 
     if want_open:
         elf = build_open(args.build_dir)
-        print(f"open: {elf} ({elf.stat().st_size} bytes; ESP32 FoA lab image)", flush=True)
+        print(f"open: {elf} ({elf.stat().st_size} bytes; ESP32-S3 FoA image)", flush=True)
 
 
 if __name__ == "__main__":

@@ -101,8 +101,8 @@ glyphs — is tracked in [`docs/cjk-rendering.md`](docs/cjk-rendering.md).
 
 **reTerminal E1002** — three firmwares: `switch` (exclusive Wi‑Fi or AirDrop),
 `coex` (Espressif APSTA ch6 dual-protocol RX experiment), and `open` (FoA
-`foa_sta` + `foa_awdl` concurrent open MAC, classic ESP32 lab/companion until
-S3). ESP32Drop sits behind a small Arduino shim with local radio-ownership
+`foa_sta` + `foa_awdl` concurrent open MAC on ESP32-S3 via in-tree FoA patches).
+ESP32Drop sits behind a small Arduino shim with local radio-ownership
 patches. See [`firmware/reterminal-e1002/README.md`](firmware/reterminal-e1002/README.md).
 
 See [`docs/architecture.md`](docs/architecture.md) for the details, the

@@ -3,38 +3,82 @@ name = "e1002-open"
 version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
-description = "FoA open-MAC concurrent STA + AWDL firmware (E1002 radio lab / companion)"
+description = "FoA open-MAC concurrent STA + AWDL firmware (E1002 / ESP32-S3)"
 publish = false
+default-run = "e1002-open"
+autobins = false
+
+[[bin]]
+name = "e1002-open"
+path = "src/main.rs"
+required-features = ["firmware"]
 
 [dependencies]
-esp-hal = { version = "=1.1.2", features = ["esp32"] }
-esp-rtos = { version = "0.3.0", features = ["embassy", "esp32"] }
-esp-backtrace = { version = "0.19.0", features = ["panic-handler", "println", "esp32"] }
+# Always available (host-testable companion codec).
+# Device stack is optional so `cargo test --lib` does not need the esp toolchain.
+
+esp-hal = { version = "=1.1.2", features = ["esp32s3"], optional = true }
+esp-rtos = { version = "0.3.0", features = ["embassy", "esp32s3"], optional = true }
+esp-backtrace = { version = "0.19.0", features = ["panic-handler", "println", "esp32s3"], optional = true }
 esp-println = { version = "0.17.0", default-features = false, features = [
     "critical-section",
     "uart",
-    "esp32",
+    "esp32s3",
     "log-04",
-] }
-esp-alloc = "0.10.0"
-esp-bootloader-esp-idf = { version = "0.5.0", features = ["esp-rom-sys", "esp32"] }
+], optional = true }
+esp-alloc = { version = "0.10.0", optional = true }
+esp-bootloader-esp-idf = { version = "0.5.0", features = ["esp-rom-sys", "esp32s3"], optional = true }
 
-embassy-executor = { version = "0.10.0" }
-embassy-time = { version = "0.5.1" }
-embassy-futures = { version = "0.1.2" }
+embassy-executor = { version = "0.10.0", optional = true }
+embassy-time = { version = "0.5.1", optional = true }
+embassy-futures = { version = "0.1.2", optional = true }
+embassy-net = { version = "0.9.1", features = [
+    "proto-ipv4",
+    "proto-ipv6",
+    "dhcpv4",
+    "medium-ethernet",
+    "udp",
+    "tcp",
+    "dns",
+], optional = true }
+embassy-sync = { version = "0.8.0", optional = true }
+embedded-io = { version = "0.6.1", optional = true }
 
-# FoA open 802.11 stack: concurrent virtual interfaces (STA + AWDL).
-# Pinned to the FoA revision that ships foa_awdl alongside foa_sta.
-foa = { git = "https://github.com/esp32-open-mac/FoA", rev = "2b7ec1346548a30fa1e57cb780f666cb47693a0c", features = ["esp32", "log"] }
-foa_sta = { git = "https://github.com/esp32-open-mac/FoA", rev = "2b7ec1346548a30fa1e57cb780f666cb47693a0c", features = ["esp32", "alloc", "log"] }
-foa_awdl = { git = "https://github.com/esp32-open-mac/FoA", rev = "2b7ec1346548a30fa1e57cb780f666cb47693a0c", features = ["esp32", "log"] }
+foa = { path = "../../third_party/FoA/foa", features = ["esp32s3", "log"], optional = true }
+foa_sta = { path = "../../third_party/FoA/foa_sta", features = ["esp32s3", "alloc", "log"], optional = true }
+foa_awdl = { path = "../../third_party/FoA/foa_awdl", features = ["esp32s3", "log"], optional = true }
 
-static_cell = "2.1.1"
-log = "0.4.33"
+static_cell = { version = "2.1.1", optional = true }
+log = { version = "0.4.33", optional = true }
+heapless = { version = "0.9.3", optional = true }
 
 [features]
-default = ["esp32"]
-esp32 = []
+default = []
+# Device firmware (ESP32-S3 FoA STA + AWDL). Required to build the binary.
+firmware = [
+    "dep:esp-hal",
+    "dep:esp-rtos",
+    "dep:esp-backtrace",
+    "dep:esp-println",
+    "dep:esp-alloc",
+    "dep:esp-bootloader-esp-idf",
+    "dep:embassy-executor",
+    "dep:embassy-time",
+    "dep:embassy-futures",
+    "dep:embassy-net",
+    "dep:embassy-sync",
+    "dep:embedded-io",
+    "dep:foa",
+    "dep:foa_sta",
+    "dep:foa_awdl",
+    "dep:static_cell",
+    "dep:log",
+    "dep:heapless",
+]
+# CLI / build.py alias (`--features firmware,esp32s3`).
+esp32s3 = ["firmware"]
+# Legacy alias kept so older scripts that pass `--features esp32` still work.
+esp32 = ["firmware"]
 
 [profile.dev]
 opt-level = "s"

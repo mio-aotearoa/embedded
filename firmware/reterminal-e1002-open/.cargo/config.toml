@@ -1,13 +1,15 @@
-[target.'cfg(any(target_arch = "xtensa", target_arch = "riscv"))']
+[target.xtensa-esp32s3-none-elf]
+runner = "espflash flash --monitor -S"
+rustflags = []
+
+[target.'cfg(target_arch = "xtensa")']
 runner = "espflash flash --monitor -S"
 
-[build]
-target = "xtensa-esp32-none-elf"
-
-[env]
-# Optional: set SSID / PASSWORD when linking a real STA for lab tests.
-# SSID = "your-ch6-ap"
-# PASSWORD = "secret"
-
+# no_std targets need core/alloc from rust-src (esp toolchain provides it).
 [unstable]
 build-std = ["core", "alloc"]
+
+# Bake association credentials when building (optional; omit for scan-only STA):
+#   SSID='ch6ap' PASSWORD='secret' cargo build --release --features firmware,esp32s3 \
+#     --target xtensa-esp32s3-none-elf
+[env]

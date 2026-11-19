@@ -1,0 +1,233 @@
+diff --git a/esp-wifi-hal/Cargo.toml b/esp-wifi-hal/Cargo.toml
+index b696b43..bb4b254 100644
+--- a/esp-wifi-hal/Cargo.toml
++++ b/esp-wifi-hal/Cargo.toml
+@@ -20,9 +20,13 @@ esp32 = { version = "=0.40.2", optional = true, features = [
+ esp32s2 = { version = "=0.31.2", optional = true, features = [
+   "critical-section",
+ ] }
++esp32s3 = { version = "=0.35.2", optional = true, features = [
++  "critical-section",
++] }
+ 
+ esp-wifi-sys-esp32 = { version = "=0.2.0", optional = true }
+ esp-wifi-sys-esp32s2 = { version = "=0.2.0", optional = true }
++esp-wifi-sys-esp32s3 = { version = "=0.2.0", optional = true }
+ 
+ # Embassy dependencies
+ embassy-futures = "0.1.2"
+@@ -38,7 +42,7 @@ bitfield-struct = "0.13.0"
+ log = { version = "0.4.28", optional = true }
+ critical-section = "1.2.0"
+ num = { version = "0.4.3", default-features = false }
+-esp-wifi-rates = { version = "0.1.0" }
++esp-wifi-rates = { path = "../esp-wifi-rates", version = "0.1.0" }
+ 
+ [profile.dev]
+ # Rust debug is too slow.
+@@ -69,6 +73,16 @@ esp32s2 = [
+   "esp-phy/esp32s2",
+   "esp-sync/esp32s2",
+ ]
++# S3 Wi-Fi MAC MMIO matches S2 (0x6003_3000). Official esp32s3 PAC omits the
++# reverse-engineered WIFI block, so we also pull esp32s2 for that register map.
++esp32s3 = [
++  "dep:esp32s3",
++  "dep:esp32s2",
++  "esp-hal/esp32s3",
++  "esp-wifi-sys-esp32s3",
++  "esp-phy/esp32s3",
++  "esp-sync/esp32s3",
++]
+ 
+ defmt = [
+   "dep:defmt",
+diff --git a/esp-wifi-hal/build.rs b/esp-wifi-hal/build.rs
+index 4095049..f8d5402 100644
+--- a/esp-wifi-hal/build.rs
++++ b/esp-wifi-hal/build.rs
+@@ -7,12 +7,16 @@ const NOMAC_CHANNEL_SET: &str = "nomac_channel_set";
+ 
+ const ESP32_META: &[&str] = &["esp32", NOMAC_CHANNEL_SET];
+ const ESP32S2_META: &[&str] = &["esp32s2", PWR_INTERRUPT_PRESENT, OSI_FUNCS_REQUIRED];
++// S3 shares the S2-class MAC (PWR IRQ + OSI + same MAC init/clock family).
++const ESP32S3_META: &[&str] = &["esp32s3", PWR_INTERRUPT_PRESENT, OSI_FUNCS_REQUIRED];
+ 
+ fn main() {
+     let meta = if cfg!(feature = "esp32") {
+         ESP32_META
+     } else if cfg!(feature = "esp32s2") {
+         ESP32S2_META
++    } else if cfg!(feature = "esp32s3") {
++        ESP32S3_META
+     } else {
+         panic!("You must select exactly one chip.");
+     };
+diff --git a/esp-wifi-hal/src/async_driver.rs b/esp-wifi-hal/src/async_driver.rs
+index affecc1..9b13e83 100644
+--- a/esp-wifi-hal/src/async_driver.rs
++++ b/esp-wifi-hal/src/async_driver.rs
+@@ -302,7 +302,8 @@ pub trait CryptoControl: HasLowLevelDriver {
+     fn dump_key_slot(&self, key_slot: usize) -> Result<(), OutOfBounds> {
+         WiFi::validate_key_slot(key_slot)?;
+ 
+-        let wifi = WIFI::regs();
++        // Use the PAC Wi-Fi block (S3 WIFI is a virtual esp-hal peri without regs()).
++        let wifi = unsafe { LowLevelDriver::regs() };
+         let crypto_key_slot = wifi.crypto_key_slot(key_slot);
+ 
+         let mut key_bytes = [0x00u8; 32];
+@@ -352,7 +353,7 @@ pub trait CryptoControl: HasLowLevelDriver {
+     }
+     /// Dump the values of the crypto control registers.
+     fn dump_crypto_config(&self) {
+-        let wifi = WIFI::regs();
++        let wifi = unsafe { LowLevelDriver::regs() };
+         for (i, interface_crypto_control) in wifi
+             .crypto_control()
+             .interface_crypto_control_iter()
+diff --git a/esp-wifi-hal/src/ffi.rs b/esp-wifi-hal/src/ffi.rs
+index 6ea5f19..d7d777c 100644
+--- a/esp-wifi-hal/src/ffi.rs
++++ b/esp-wifi-hal/src/ffi.rs
+@@ -242,6 +242,25 @@ unsafe extern "C" {
+     }
+     pub fn hal_init();
+     pub fn tx_pwctrl_background(_: u8, _: u8);
++    // Classic ESP32 / S2 PHY exports enable/disable_wifi_agc; S3 names them ram_*.
++    #[cfg(not(esp32s3))]
+     pub fn enable_wifi_agc();
++    #[cfg(not(esp32s3))]
+     pub fn disable_wifi_agc();
++    #[cfg(esp32s3)]
++    pub fn ram_enable_wifi_agc();
++    #[cfg(esp32s3)]
++    pub fn ram_disable_wifi_agc();
++}
++
++#[cfg(esp32s3)]
++#[inline]
++pub unsafe fn enable_wifi_agc() {
++    unsafe { ram_enable_wifi_agc() }
++}
++
++#[cfg(esp32s3)]
++#[inline]
++pub unsafe fn disable_wifi_agc() {
++    unsafe { ram_disable_wifi_agc() }
+ }
+diff --git a/esp-wifi-hal/src/lib.rs b/esp-wifi-hal/src/lib.rs
+index c15c71f..a83c709 100644
+--- a/esp-wifi-hal/src/lib.rs
++++ b/esp-wifi-hal/src/lib.rs
+@@ -1,6 +1,6 @@
+ //! # `esp-wifi-hal`
+ //! This is an experimental driver for the Wi-Fi peripheral on ESP32-series chips.
+-//! Currently we support both the plain ESP32 and the ESP32-S2.
++//! Currently we support the plain ESP32, ESP32-S2, and ESP32-S3.
+ //! ## Hardware overview
+ //! This chapter will give a short overview of the structure of the Wi-Fi MAC peripheral.
+ //!
+@@ -81,11 +81,22 @@ cfg_select! {
+         use esp32s2 as esp_pac;
+         use esp_wifi_sys_esp32s2 as esp_wifi_sys;
+     }
++    feature = "esp32s3" => {
++        use esp_wifi_sys_esp32s3 as esp_wifi_sys;
++    }
+     _ => {
+         compile_error!("Adjust this for a new chip.");
+     }
+ }
+ 
++// ESP32-S3 PAC has WIFI_MAC / WIFI_PWR IRQs but no reverse-engineered WIFI
++// register block. Reuse the S2 map at the same base address (0x6003_3000).
++#[cfg(feature = "esp32s3")]
++mod esp_pac {
++    pub use esp32s2::{wifi, WIFI};
++    pub use esp32s3::Interrupt;
++}
++
+ cfg_select! {
+     feature = "critical_section" => {
+         type DefaultRawMutex = embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+diff --git a/esp-wifi-hal/src/ll.rs b/esp-wifi-hal/src/ll.rs
+index 05c18ae..edba01c 100644
+--- a/esp-wifi-hal/src/ll.rs
++++ b/esp-wifi-hal/src/ll.rs
+@@ -19,9 +19,12 @@ cfg_select! {
+         use esp_hal::peripherals::DPORT as SYSCON;
+     }
+     feature = "esp32s2" => {
+-
+         use esp_hal::peripherals::SYSCON;
+     }
++    feature = "esp32s3" => {
++        // S3 names the same block APB_CTRL (wifi_clk_en / wifi_rst_en).
++        use esp_hal::peripherals::APB_CTRL as SYSCON;
++    }
+ }
+ 
+ use esp_phy::{PhyInitGuard, enable_phy};
+@@ -200,9 +203,10 @@ interrupt_cause_struct! {
+         /// A TBTT was reached or is about to be reached.
+         ///
+         /// NOTE: This is an unconfirmed assumption.
+-        tbtt => [@chip(esp32s2) 0x1e],
++        // S2/S3 share these cause bits (`pwr_interrupt_present` chips only).
++        tbtt => 0x1e,
+         /// We don't know them meaning of this yet.
+-        tsf_timer => [@chip(esp32s2) 0x1e0]
++        tsf_timer => 0x1e0
+     }
+ }
+ 
+@@ -497,7 +501,7 @@ impl From<EdcaAccessCategory> for HardwareTxQueue {
+     }
+ }
+ 
+-#[cfg(any(feature = "esp32", feature = "esp32s2"))]
++#[cfg(any(feature = "esp32", feature = "esp32s2", feature = "esp32s3"))]
+ /// The number of "interfaces" supported by the hardware.
+ pub const INTERFACE_COUNT: usize = 4;
+ 
+@@ -600,7 +604,7 @@ impl LowLevelDriver {
+     unsafe fn reset_mac(&self) {
+         // Perform a full reset of the Wi-Fi module.
+         cfg_select! {
+-            any(feature = "esp32", feature = "esp32s2") => {
++            any(feature = "esp32", feature = "esp32s2", feature = "esp32s3") => {
+                 let syscon = SYSCON::regs();
+                 syscon.wifi_rst_en().modify(|_, w| w.mac_rst().set_bit());
+                 syscon.wifi_rst_en().modify(|_, w| w.mac_rst().clear_bit());
+@@ -627,7 +631,8 @@ impl LowLevelDriver {
+                 const MAC_INIT_MASK: u32 = 0xffffe800;
+                 const MAC_READY_MASK: u32 = 0x2000;
+             }
+-            feature = "esp32s2" => {
++            any(feature = "esp32s2", feature = "esp32s3") => {
++                // S3 uses the S2-class MAC init sequence (same MMIO layout).
+                 const MAC_INIT_MASK: u32 = 0xff00efff;
+                 const MAC_READY_MASK: u32 = 0x6000;
+             }
+@@ -636,9 +641,9 @@ impl LowLevelDriver {
+             }
+         }
+         // Spin until the MAC state is marked as ready.
+-        // This is only required on the ESP32-S2.
++        // This is only required on the ESP32-S2 / S3-class MAC.
+         while !intialized
+-            && cfg!(feature = "esp32s2")
++            && cfg!(any(feature = "esp32s2", feature = "esp32s3"))
+             && Self::regs_internal().ctrl().read().bits() & MAC_READY_MASK != 0
+         {}
+         // If we are initializing the MAC, we need to clear some bits, by masking the reg, with the
+@@ -704,6 +709,8 @@ impl LowLevelDriver {
+         let enable_mask = cfg_select! {
+             feature = "esp32" => 0x00000406,
+             feature = "esp32s2" => 0x000007cf,
++            // Same modem-clock enable mask as S2 until measured otherwise on S3.
++            feature = "esp32s3" => 0x000007cf,
+             _ => compile_error!("If you're adding a new chip, you have to adjust the modem clock enable mask.")
+         };
+         SYSCON::regs()

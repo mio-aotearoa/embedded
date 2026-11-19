@@ -92,3 +92,16 @@ Its `dir` is `TactileBrowser`, so both apply beside the Lexbor series.
   weights off a linear map (the T-Deck reads them from the SD card) can override
   the two `deq_row` calls in `llm_forward` without forking the rest of
   `runtime/llm.h`.
+
+## esp-wifi-hal
+
+* `0001-esp32s3-support.patch` — adds an `esp32s3` feature. The official S3 PAC
+  has WIFI IRQs but no reverse-engineered MAC register block; the patch reuses
+  the S2 WIFI map at `0x6003_3000`, clocks/resets via `APB_CTRL`, and the
+  S2-class MAC init / modem-clock masks.
+
+## FoA
+
+* `0001-esp32s3-support.patch` — wires `esp32s3` through `foa` / `foa_sta` /
+  `foa_awdl` (and examples) and points `esp-wifi-hal` at the patched path crate
+  under `third_party/esp-wifi-hal`.
