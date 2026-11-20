@@ -13,7 +13,7 @@ ime="$root/third_party/lvgl_pinyin_ime"
 eng="$ime/src/third_party/libgooglepinyin"
 raw="$ime/data/dict/rawdict_utf16_65105_freq.txt"
 hzs="$ime/data/dict/valid_utf16.txt"
-out="${1:-$root/out/dict_pinyin.dat}"
+out="${1:-$root/out/ime/dict_pinyin.dat}"
 
 for f in "$raw" "$hzs" "$eng/tools/pinyinime_dictbuilder.cpp"; do
     [ -f "$f" ] || { echo "missing $f (is the submodule checked out?)" >&2; exit 1; }
@@ -38,4 +38,4 @@ else
     size="$(wc -c < "$out" | tr -d ' ')"
 fi
 printf 'dictionary: %s (%s bytes)\n' "$out" "$size"
-printf 'copy it to the card as /sd/ime/dict_pinyin.dat\n'
+printf 'copy it to the card as /ime/dict_pinyin.dat\n'

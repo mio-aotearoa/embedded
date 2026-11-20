@@ -33,8 +33,13 @@ esac
 ./scripts/duktape.sh
 
 # One core dir for both build paths (script and `nix run .#firmware`), so the
-# espressif32 platform and lib_deps are downloaded only once.
-export PLATFORMIO_CORE_DIR="${PLATFORMIO_CORE_DIR:-$ROOT/.platformio}"
+# espressif32 platform and lib_deps are downloaded only once. Force an absolute
+# path: a broken nix mkShell once exported the literal string '$PWD/.platformio'.
+case "${PLATFORMIO_CORE_DIR:-}" in
+  ""|'$PWD/.platformio'|'$PWD/'*) export PLATFORMIO_CORE_DIR="$ROOT/.platformio" ;;
+  /*) ;;
+  *) export PLATFORMIO_CORE_DIR="$ROOT/.platformio" ;;
+esac
 mkdir -p "$PLATFORMIO_CORE_DIR"
 
 echo "==> wadamesh base: $(git -C third_party/wadamesh rev-parse --short HEAD)"

@@ -17,7 +17,7 @@
 #include "i18n.h"
 #include "psram_alloc.h"
 #include "url_util.h"   // bare host -> https://
-#include "ime_ja.h"
+#include "ime_mode.h"
 #include "tactilebrowser_core.h"
 #include "web_enhance.h"
 #include "js_engine.h"
@@ -499,10 +499,8 @@ void BrowserApp::taCb(lv_event_t *e)
     const lv_event_code_t code = lv_event_get_code(e);
     if (code == LV_EVENT_LONG_PRESSED)
     {
-        // Japanese extension lives in wadamesh's typing path; toggle it per field.
-        imeJaToggle();
-        app->setStatus(imeJaActive() ? TR("Japanese: romaji, Space = kana")
-                                     : TR("Enter a URL"));
+        imeModeCycle();
+        app->setStatus(imeMode() == IME_OFF ? TR("Enter a URL") : imeModeStatus());
         return;
     }
     if (code == LV_EVENT_FOCUSED || code == LV_EVENT_CLICKED)

@@ -1,5 +1,5 @@
 diff --git a/platformio.ini b/platformio.ini
-index 03a11235..2ddbbd30 100644
+index 03a11235..6fcdce67 100644
 --- a/platformio.ini
 +++ b/platformio.ini
 @@ -544,7 +544,13 @@ platform = platformio/espressif32@6.11.0
@@ -17,7 +17,7 @@ index 03a11235..2ddbbd30 100644
  extra_scripts = pre:scripts/build/pre_gen_baked.py, pre:scripts/inject_wifi_env.py, pre:scripts/build/fatfs_exfat.py, pre:scripts/build/patch_lvgl_anim_uaf.py, pre:scripts/build/patch_lvgl_scroll_uaf.py, pre:scripts/build/patch_lvgl_async_del.py, pre:scripts/build/patch_lvgl_arabic.py, pre:scripts/build/patch_meshcore_txt_timestamp.py, pre:scripts/build/perf_lvgl.py, merge-bin.py
  custom_lvgl_o2 = core, draw, font, misc   ; LVGL's per-frame code at -O2 (scripts/build/perf_lvgl.py); widgets and extra stay -Os
  ; custom_lvgl_iram = lv_draw_sw_blend.c, lv_draw_label.c   ; off on the T-Deck: its ~6 KB of internal RAM is worth more than ~8% of a frame (on-device updates and TLS ran out)
-@@ -686,6 +692,63 @@ build_flags =
+@@ -686,6 +692,72 @@ build_flags =
    -D CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=16384
    -D CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=4096
  
@@ -36,6 +36,15 @@ index 03a11235..2ddbbd30 100644
 +  -D ZSTD_MULTITHREAD=0
 +  -D ZSTD_DISABLE_ASM=1
 +  -D ZSTD_STRIP_ERROR_STRINGS=1
++
++  ; --- CJK IME: libgooglepinyin engine (LVGL-free) + SD dictionaries ---
++  ; No -include pinyinime_compat.h: that shim is for MinGW host tests. On
++  ; ESP-IDF, libgooglepinyin already uses real pthread; a global -include
++  ; pulls sys/select.h into every TU and breaks lib/ed25519 (static select()).
++  -I ../../third_party/lvgl_pinyin_ime/include
++  -I ../../third_party/lvgl_pinyin_ime/src/third_party/libgooglepinyin/include
++  -I ../../third_party/lvgl_pinyin_ime/src/third_party/libgooglepinyin/port
++  -D PINYINIME_RUNTIME_ONLY=1
 +
 +  ; --- esp32-ai: SD-backed TinyStories runtime (llm.h) + asset manager ---
 +  -D WADAMESH_ESP32AI=1
@@ -81,11 +90,15 @@ index 03a11235..2ddbbd30 100644
  build_src_filter =
    +<*.cpp>
    +<*.c>
-@@ -696,6 +759,49 @@ build_src_filter =
+@@ -696,6 +768,53 @@ build_src_filter =
    +<ui-touch/*.cpp>
    +<ui-touch/*.c>
    +<../variants/lilygo_tdeck/*.cpp>
 +  +<../../../firmware/tdeck-plus/ime/*.cpp>
++  +<../../../third_party/lvgl_pinyin_ime/src/core/ime_engine_port.cpp>
++  +<../../../third_party/lvgl_pinyin_ime/src/third_party/libgooglepinyin/src/*.cpp>
++  -<../../../third_party/lvgl_pinyin_ime/src/third_party/libgooglepinyin/src/dictbuilder.cpp>
++  -<../../../third_party/lvgl_pinyin_ime/src/third_party/libgooglepinyin/src/utf16reader.cpp>
 +  +<../../../firmware/tdeck-plus/kiwix/*.cpp>
 +  +<../../../firmware/tdeck-plus/common/*.cpp>
 +  +<../../../firmware/tdeck-plus/esp32ai/*.cpp>
@@ -161,7 +174,7 @@ index 484c510a..b05aad5f 100644
   * Create a page root: full width, from just under the status bar to the bottom of the
   * screen, on lv_layer_top, opaque `bg_color`, non-scrollable and CLICKABLE so no press
 diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
-index f799c2e4..0a4f7160 100644
+index b1e1085d..76f5e7a5 100644
 --- a/src/ui-touch/UITask.cpp
 +++ b/src/ui-touch/UITask.cpp
 @@ -158,6 +158,30 @@ static void* wadaMp3Scratch() { return s_wada_mp3_scratch; }
@@ -237,7 +250,7 @@ index f799c2e4..0a4f7160 100644
    // Every OTHER full-screen app page (Airtime, Spectrum, RF Monitor, Discover, VNC, Remote,
    // Reader) also owns the screen, so swallow the swipe instead of letting it reach the tab
    // switcher behind the page. Making the page root opaque + CLICKABLE only stops CLICKS:
-@@ -29957,7 +30002,19 @@ static const char* sdRemovedAlertText() {
+@@ -29968,7 +30013,19 @@ static const char* sdRemovedAlertText() {
                            : TR("SD card removed");
  }
  #endif
@@ -258,7 +271,7 @@ index f799c2e4..0a4f7160 100644
  static lv_obj_t* s_fm_fmt_overlay = nullptr; // full-screen "formatting..." notice
  static lv_obj_t* s_fm_actions    = nullptr;  // per-entry action sheet
  static lv_obj_t* s_fm_prompt     = nullptr;  // text-input modal (rename / new folder)
-@@ -31862,12 +31919,73 @@ static void fmSdDoFormat() {
+@@ -31873,12 +31930,73 @@ static void fmSdDoFormat() {
        g_lv.task->showAlert(TR("SD is busy - close tools and retry"), 2600);
      return;
    }
@@ -336,7 +349,7 @@ index f799c2e4..0a4f7160 100644
  // Tap on an unmounted SD row: try to mount, and if the card is unreadable
  // (no FAT16/FAT32/exFAT volume, or a corrupt one) offer to format.
  static void fmSdMountOrFormatCb(lv_event_t* e) {
-@@ -31875,7 +31993,7 @@ static void fmSdMountOrFormatCb(lv_event_t* e) {
+@@ -31886,7 +32004,7 @@ static void fmSdMountOrFormatCb(lv_event_t* e) {
    s_sd_retry_after_ms = 0;   // explicit user retry — bypass the mount backoff
    if (fmSdTryMount()) { fmShowRoots(); return; }
    s_confirm_owner_next = true;
@@ -345,7 +358,7 @@ index f799c2e4..0a4f7160 100644
  }
  
  // Seed the core folder layout on a freshly-formatted MESHCOMOD card. These back
-@@ -31966,7 +32084,7 @@ static void sdWriteFatLabel(uint8_t pdrv, const char* label) {
+@@ -31977,7 +32095,7 @@ static void sdWriteFatLabel(uint8_t pdrv, const char* label) {
  static void fmSdLongPressFormatCb(lv_event_t* e) {
    if (lv_event_get_code(e) != LV_EVENT_LONG_PRESSED) return;
    s_confirm_owner_next = true;
@@ -354,7 +367,7 @@ index f799c2e4..0a4f7160 100644
  }
  
  #endif  // HAS_TDECK_GT911 || HAS_THINKNODE_M9 (microSD mount/format helpers)
-@@ -34244,6 +34362,7 @@ static const char    kReaderHomeUrl[] = "sd:/home.htm";
+@@ -34255,6 +34373,7 @@ static const char    kReaderHomeUrl[] = "sd:/home.htm";
  static const char    kReaderChangelogUrl[] = "http://wadamesh.com/changelog.html";
  static lv_obj_t*     s_reader_root   = nullptr;
  static lv_obj_t*     s_reader_url_ta = nullptr;
@@ -362,7 +375,7 @@ index f799c2e4..0a4f7160 100644
  static lv_obj_t*     s_reader_go     = nullptr;
  static lv_obj_t*     s_reader_editbtn= nullptr;    // floating "edit URL" button (shown while reading)
  static lv_obj_t*     s_reader_scroll = nullptr;    // flex-column body container (holds text + link labels)
-@@ -34262,7 +34381,7 @@ static auto&         s_reader_pending_url = psramStatic<char[300]>();
+@@ -34273,7 +34392,7 @@ static auto&         s_reader_pending_url = psramStatic<char[300]>();
  static char          s_reader_msg[110] = "";       // status text (worker writes, UI shows)
  static TaskHandle_t  s_reader_task    = nullptr;
  static bool          s_reader_pristine = false;    // URL field still holds the untouched default
@@ -371,7 +384,7 @@ index f799c2e4..0a4f7160 100644
  static const size_t  kReaderTextCap =  60 * 1024;  // max extracted text we keep
  // Links found on the page: byte range in s_reader_text + resolved absolute href.
  using ReaderLink = ReaderContent::Link;
-@@ -34429,20 +34548,61 @@ static void readerFetchBody() {
+@@ -34440,20 +34559,61 @@ static void readerFetchBody() {
    if (!raw) { rawcap = 24 * 1024; raw = (uint8_t*)heap_caps_malloc(rawcap, MALLOC_CAP_SPIRAM); }
    int code = -1; size_t total = 0; bool source_ok = false;
    ReaderLocalResult local_result = ReaderLocalResult::NoStorage;
@@ -439,7 +452,7 @@ index f799c2e4..0a4f7160 100644
          ReaderBufferStream sink(raw, rawcap - 1, generation);
          const int transfer_result = httpc.writeToStream(&sink);
          total = sink.size();
-@@ -34451,6 +34611,7 @@ static void readerFetchBody() {
+@@ -34462,6 +34622,7 @@ static void readerFetchBody() {
        httpc.end();
      }
    }
@@ -447,7 +460,7 @@ index f799c2e4..0a4f7160 100644
    if (!raw) snprintf(result_msg, sizeof result_msg, "Out of memory");
    else if (source_ok && total >= 2 && raw[0] == 0x1f && (uint8_t)raw[1] == 0x8b)
      snprintf(result_msg, sizeof result_msg, "Page is gzip-compressed \xe2\x80\x94 not supported yet");
-@@ -34647,7 +34808,26 @@ static void readerShowMessage(const char* msg, uint32_t color) {
+@@ -34658,7 +34819,26 @@ static void readerShowMessage(const char* msg, uint32_t color) {
    lv_obj_set_style_text_color(l, lv_color_hex(color), LV_PART_MAIN);
    lv_label_set_text(l, msg);
  }
@@ -475,7 +488,7 @@ index f799c2e4..0a4f7160 100644
  // Rebuild the body: flowing text split into paragraph labels + tappable link labels.
  static void readerRenderBody() {
    if (!s_reader_scroll) return;
-@@ -56210,6 +56390,12 @@ static void updateTrackball(unsigned long now) {
+@@ -56221,6 +56401,12 @@ static void updateTrackball(unsigned long now) {
      s_tb_click_prev_app = click_now;
      if (moved && (dx != 0 || dy != 0)) {
        if (luaAppIsOpen()) luaAppSteer(dx, dy);
@@ -488,7 +501,7 @@ index f799c2e4..0a4f7160 100644
        else                SnakeGame::steer(dx, dy);
        if (g_lv.task) g_lv.task->noteUserInput();
      }
-@@ -61843,6 +62029,31 @@ static unsigned long s_hw_last_space_ms = 0;
+@@ -61854,6 +62040,32 @@ static unsigned long s_hw_last_space_ms = 0;
  // Route a physical-keyboard character into the textarea currently being edited
  // — the on-screen keyboard's target, which is the chat composer directly or the
  // settings mirror textarea. No field open -> the key is ignored.
@@ -497,15 +510,16 @@ index f799c2e4..0a4f7160 100644
 +// below would otherwise move focus onto the tab bar hidden BEHIND the page.
 +static lv_obj_t* s_page_text_field = nullptr;
 +
-+// Japanese romaji->kana extension (firmware/tdeck-plus/ime). Declared here so the
-+// typing paths below can call it without the UI translation unit including it.
-+bool imeJaActive();
-+bool imeJaCommit(lv_obj_t* ta);
++// CJK IME (firmware/tdeck-plus/ime): Off / Japanese / Chinese. Declared here so
++// the typing paths below can call it without the UI translation unit including it.
++bool imeHandleKey(lv_obj_t* ta, int key);
++void imeDismissUi(void);
 +
 +void appPageBindTextField(lv_obj_t* ta) {
 +  if (ta && !lv_obj_is_valid(ta)) ta = nullptr;
 +  if (s_page_text_field && s_page_text_field != ta && lv_obj_is_valid(s_page_text_field))
 +    lv_obj_clear_state(s_page_text_field, LV_STATE_FOCUSED);
++  if (!ta) imeDismissUi();
 +  s_page_text_field = ta;
 +  if (!g_lv.keyboard) return;
 +  // Hidden on purpose: these boards have a real keyboard (see the composer path).
@@ -520,7 +534,7 @@ index f799c2e4..0a4f7160 100644
  static void handleHwKey(int key) {
    if (key != ' ') s_hw_last_space_ms = 0;
    if (!g_lv.keyboard) return;
-@@ -62037,6 +62248,33 @@ if (g_lv.task && g_lv.task->isManualLock()) {
+@@ -62048,6 +62260,32 @@ if (g_lv.task && g_lv.task->isManualLock()) {
      if (g_lv.keyboard) lv_keyboard_set_textarea(g_lv.keyboard, nullptr);
      ta_focused = nullptr;
    }
@@ -531,8 +545,9 @@ index f799c2e4..0a4f7160 100644
 +    if (!lv_obj_is_valid(s_page_text_field)) {
 +      s_page_text_field = nullptr;
 +    } else if (ta_focused == s_page_text_field) {
-+      if (key == 0x0D || key == 0x0A) {
-+        if (imeJaActive()) imeJaCommit(s_page_text_field);
++      if (imeHandleKey(s_page_text_field, key)) {
++        // Space / Enter / digits consumed by JA/ZH IME (candidates or convert)
++      } else if (key == 0x0D || key == 0x0A) {
 +        lv_event_send(s_page_text_field, LV_EVENT_READY, nullptr);
 +      } else if (key == 0x08 || key == 0x7F) {
 +        lv_textarea_del_char(s_page_text_field);
@@ -542,8 +557,6 @@ index f799c2e4..0a4f7160 100644
 +        lv_textarea_cursor_left(s_page_text_field);
 +      } else if (key == LV_KEY_RIGHT) {
 +        lv_textarea_cursor_right(s_page_text_field);
-+      } else if (key == ' ' && imeJaActive() && imeJaCommit(s_page_text_field)) {
-+        // the trailing romaji became kana: the space was the conversion key
 +      } else if (key >= 0x20 && key < 0x7F) {
 +        lv_textarea_add_char(s_page_text_field, (uint32_t)key);
 +      }
@@ -554,27 +567,42 @@ index f799c2e4..0a4f7160 100644
  #if CAP_KEYPAD_NAV && !defined(TLORA_PAGER)
    // Edit mode (keyboard-nav ON only): a focused field becomes the typing target after
    // select/Enter (below) — until then `ta` is null so the nav keys navigate. With
-@@ -62377,6 +62615,11 @@ if (g_lv.task && g_lv.task->isManualLock()) {
+@@ -62388,6 +62626,11 @@ if (g_lv.task && g_lv.task->isManualLock()) {
      }
      accentBoxHide();
    } else if (key == ' ') {
-+    // Japanese extension: Space converts the trailing romaji run to kana first.
-+    if (imeJaActive() && imeJaCommit(ta)) {
++    // CJK IME: Space converts / cycles candidates when JA or ZH is active.
++    if (imeHandleKey(ta, key)) {
 +      if (g_lv.task) g_lv.task->noteUserInput();
 +      return;
 +    }
      // Double-tap SPACE within kDoubleSpaceMs toggles between English and
      // the configured secondary keyboard. If no secondary is set, it behaves
      // as a normal space. The limit is 250 ms, except on the M9: its same-key
-@@ -62405,6 +62648,7 @@ if (g_lv.task && g_lv.task->isManualLock()) {
+@@ -62416,6 +62659,10 @@ if (g_lv.task && g_lv.task->isManualLock()) {
        lv_textarea_add_char(ta, ' ');
      }
    } else if (key == 0x0D) {                   // regular ENTER (CR)
-+    if (imeJaActive()) imeJaCommit(ta);       // commit pending romaji first
++    if (imeHandleKey(ta, key)) {
++      if (g_lv.task) g_lv.task->noteUserInput();
++      return;
++    }
      // Enter is a non-typing action (send / newline / submit) — always tear down the
      // accent + @-mention popups. The Enter-to-send path keeps the keyboard up "for the
      // next message", so without this the accent box for the last letter lingers over
-@@ -63465,7 +63709,9 @@ static void showSubtleNotifyLvgl(const char* text, uint32_t duration_ms) {
+@@ -62499,6 +62746,11 @@ if (g_lv.task && g_lv.task->isManualLock()) {
+     composerMentionRefresh(ta);
+ #endif
+   } else if (key >= 0x20 && key < 0x7F) {      // printable ASCII
++    // Digits / Esc while the CJK candidate bar is up.
++    if (imeHandleKey(ta, key)) {
++      if (g_lv.task) g_lv.task->noteUserInput();
++      return;
++    }
+     bool shifted = (key >= 'A' && key <= 'Z');
+     const char* mapped = keyboardLayoutMapHwKey(keyboardLayoutsGetCurrent(), key, shifted);
+     if (mapped) {
+@@ -63476,7 +63728,9 @@ static void showSubtleNotifyLvgl(const char* text, uint32_t duration_ms) {
    }
  
    if (!s_notify_chip) {
@@ -585,7 +613,7 @@ index f799c2e4..0a4f7160 100644
      lv_obj_remove_style_all(s_notify_chip);
      lv_obj_set_size(s_notify_chip, LV_SIZE_CONTENT, LV_SIZE_CONTENT);  // hugs the text
      lv_obj_set_style_bg_opa(s_notify_chip, LV_OPA_90, LV_PART_MAIN);
-@@ -66908,6 +67154,30 @@ enum AppDrawerAction {
+@@ -66919,6 +67173,30 @@ enum AppDrawerAction {
    APPACT_SOUND,
    APPACT_DRONE,
    APPACT_PHOTOS,
@@ -616,7 +644,7 @@ index f799c2e4..0a4f7160 100644
    APPACT_LUA_BASE = 100,   // APPACT_LUA_BASE + i = installed Lua app s_lua_inst[i]
  };
  // OTP Messenger (app drawer -> APPACT_OTP): the screens; protocol in OtpCore.cpp.
-@@ -67041,7 +67311,10 @@ static const AppTileDef k_app_tiles[] = {
+@@ -67052,7 +67330,10 @@ static const AppTileDef k_app_tiles[] = {
  #endif
    { UI_ICON_SLIDERS_HORIZONTAL, "Settings",  APPACT_SETTINGS,  HUE_SYS },     // "!" when an update waits
  #if defined(MULTI_TRANSPORT_COMPANION) && CAP_WEB_BROWSER
@@ -628,7 +656,7 @@ index f799c2e4..0a4f7160 100644
  #endif
  #if CAP_FILESYSTEM || defined(TLORA_PAGER)
    { UI_ICON_FOLDER,             "Files",     APPACT_FILES,     HUE_SYS },
-@@ -67056,6 +67329,27 @@ static const AppTileDef k_app_tiles[] = {
+@@ -67067,6 +67348,27 @@ static const AppTileDef k_app_tiles[] = {
    { UI_ICON_GAMEPAD_2,          "Snake",     APPACT_SNAKE,     HUE_MSG },     // native snake (Lua boards install it from the Store)
  #else
    { UI_ICON_STORE,              "Store",     APPACT_STORE,     HUE_MSG },     // Lua app store
@@ -656,7 +684,7 @@ index f799c2e4..0a4f7160 100644
  #endif
    { UI_ICON_HOUSE,              "Home",      APPACT_CMDCENTER, HUE_SYS },     // back to the Home widgets
    { UI_ICON_POWER,              "Power",     APPACT_POWER,     kAppHueDanger },
-@@ -67441,6 +67735,9 @@ static void appLaunch(int act, lv_event_t* e) {
+@@ -67452,6 +67754,9 @@ static void appLaunch(int act, lv_event_t* e) {
  #endif
  #if defined(MULTI_TRANSPORT_COMPANION) && CAP_WEB_BROWSER
      case APPACT_READER:    openReaderPage();     return;   // on-device text browser (no proxy)
@@ -666,7 +694,7 @@ index f799c2e4..0a4f7160 100644
  #endif
      case APPACT_ADVERT:    openAdvertModalCb(e);  return;
      case APPACT_POWER:     openPowerMenu();      return;
-@@ -67452,6 +67749,27 @@ static void appLaunch(int act, lv_event_t* e) {
+@@ -67463,6 +67768,27 @@ static void appLaunch(int act, lv_event_t* e) {
  #else
      case APPACT_SNAKE:     SnakeGame::launch();  return;
  #endif
@@ -694,7 +722,7 @@ index f799c2e4..0a4f7160 100644
  #if defined(HAS_TOUCH_UI)
      case APPACT_TERMINAL:  homeTerminalCb(e);    return;
  #endif
-@@ -68226,29 +68544,59 @@ static void statusBarTapCb(lv_event_t* e) {
+@@ -68237,29 +68563,59 @@ static void statusBarTapCb(lv_event_t* e) {
    if (s_cc_root) closeControlCenter(); else openControlCenter();
  }
  
@@ -773,7 +801,7 @@ index f799c2e4..0a4f7160 100644
      lv_area_t ba;
      lv_obj_get_coords(g_statusbar.root, &ba);
      if (pt.y < ba.y1 + STATUSBAR_H) return;   // the top row keeps the bar's usual tap
-@@ -68616,7 +68964,12 @@ static void buildGlobalStatusBar() {
+@@ -68627,7 +68983,12 @@ static void buildGlobalStatusBar() {
    // keypad users open the control center via the dedicated key.)
    lv_obj_add_flag(g_statusbar.root, NAV_SKIP_FLAG);
    lv_obj_add_event_cb(g_statusbar.root, statusBarTapCb, LV_EVENT_CLICKED, nullptr);
@@ -787,7 +815,7 @@ index f799c2e4..0a4f7160 100644
    // Hold the bar for 3 s to drop a screenshot to the SD card.
    lv_obj_add_event_cb(g_statusbar.root, statusBarHoldCb, LV_EVENT_PRESSED,    nullptr);
    lv_obj_add_event_cb(g_statusbar.root, statusBarHoldCb, LV_EVENT_PRESSING,   nullptr);
-@@ -75833,7 +76186,10 @@ static void refreshStatusLabels() {
+@@ -75844,7 +76205,10 @@ static void refreshStatusLabels() {
        readerStart(pending_url);
      } else {
        if (s_reader_status) lv_label_set_text(s_reader_status, s_reader_msg);
@@ -799,7 +827,7 @@ index f799c2e4..0a4f7160 100644
          if (s_reader_ok) {                  // …with a page
            readerRenderBody();
            readerSetAddrExpanded(false);     // collapse the address bar -> fullscreen reading
-@@ -94681,8 +95037,8 @@ void UITask::loop() {
+@@ -94693,8 +95057,8 @@ void UITask::loop() {
            char drv[3] = { (char)('0' + pdrv), ':', 0 };
            void* work = malloc(4096);                       // f_mkfs scratch (>= FF_MAX_SS)
            if (work) {
@@ -810,7 +838,7 @@ index f799c2e4..0a4f7160 100644
                mkfs_ok = true;
                ok = true;
              }
-@@ -96845,3 +97201,23 @@ static void docAuditFocus() {
+@@ -96857,3 +97221,23 @@ static void docAuditFocus() {
  }
  #endif
  #endif  // DOC_CAPTURE

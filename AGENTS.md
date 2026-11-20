@@ -11,8 +11,10 @@ When adding or changing firmware apps:
    multiple apps. Put shared behaviour under `firmware/tdeck-plus/common/` and
    call it from the apps. Current shared pieces: `http_fetch`, `http_download`,
    `sd_atomic`, `task_spawn`, `psram_alloc`, `game_steer`, `game_canvas`,
-   `url_util`, `app_toast`, `cpu_boost`. If you are about to paste a second
-   copy of a TLS/redirect/URL/JSON/task-spawn/steer loop, extract it instead.
+   `url_util`, `app_toast`, `cpu_boost`, and under `ime/`: `ime_mode`,
+   `ime_cand`, `ime_font`, `ime_zh` (libgooglepinyin), `skk_dict`. If you are
+   about to paste a second copy of a TLS/redirect/URL/JSON/task-spawn/steer
+   loop, extract it instead.
 3. **Do not invent stubs.** Drawer apps must be real: launch, UI, and the
    underlying work (parse / transfer / render / game tick). Caps and
    documented limits are fine; empty handlers and fake success are not.
@@ -40,11 +42,12 @@ When adding or changing firmware apps:
 
 | App | Reuse |
 |---|---|
-| Kiwix | ZIM subset + zstd; Reader; `http_fetch` / `http_download`; `psram_alloc` |
+| Kiwix | ZIM subset + zstd; Reader; `http_fetch` / `http_download`; `psram_alloc`; IME |
 | ESP-AI | `esp32-ai` + `LLM_DEQ_ROW`; `http_download`; `task_spawn` |
-| Browser | Lexbor + Duktape; `http_fetch`; `psram_alloc` |
+| Browser | Lexbor + Duktape; `http_fetch`; `psram_alloc`; IME |
 | LocalSend | Protocol v2 + ArduinoJson; `sd_atomic` |
-| Download | `http_download` + `url_util` |
+| Download | `http_download` + `url_util`; IME asset presets → `/ime/` |
+| IME (JA/ZH) | `ime_engine` + libgooglepinyin + SKK SD dict + `cjk14.bin` font |
 | Elements | NeoCalculator `ChemDatabase.h` |
 | OutRun / Voxel | Submodule engines; `game_canvas` + `game_steer` |
 

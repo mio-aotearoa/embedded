@@ -19,7 +19,9 @@ PlatformIO env by `patches/wadamesh/`.
 
 Shared under `common/`: `http_fetch`, `http_download`, `sd_atomic`,
 `task_spawn`, `psram_alloc`, `game_steer`, `game_canvas`, `url_util`,
-`app_toast`, `cpu_boost`.
+`app_toast`, `cpu_boost`. IME under `ime/`: Japanese (romaji→kana→SKK) and
+Chinese (libgooglepinyin); dictionaries + `cjk14.bin` on `/ime/` (see
+`docs/cjk-rendering.md`, `scripts/ime-assets.sh`).
 
 ## Layout
 

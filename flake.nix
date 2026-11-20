@@ -220,9 +220,10 @@
               pkgs.cmake
               pkgs.ninja
             ];
-            PLATFORMIO_CORE_DIR = "$PWD/.platformio";
             shellHook = ''
               export SSL_CERT_FILE="${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+              # Expand at shell time — a Nix attr would leave a literal '$PWD/...'.
+              export PLATFORMIO_CORE_DIR="''${PLATFORMIO_CORE_DIR:-$PWD/.platformio}"
               echo "T-Deck Plus: nix run .#firmware   or   firmware/tdeck-plus/build.sh"
               echo "E1002: source \$IDF_PATH/export.sh && firmware/reterminal-e1002/build.sh"
               echo "PlatformIO core dir: $PLATFORMIO_CORE_DIR"

@@ -11,7 +11,8 @@
 #include "http_download.h"
 #include "i18n.h"
 #include "url_util.h"   // bare host -> https://
-#include "ime_ja.h"
+#include "ime_mode.h"
+#include "ime_paths.h"
 
 #include <Arduino.h>
 #include <SD.h>
@@ -34,19 +35,15 @@ struct Preset
     const char *dir;
 };
 
-// The pinyin engine's source word lists, pinned to the submodule commit. The
-// binary dictionary is built from these by scripts/pinyin-dict.sh; this page
-// fetches the lists straight onto the card so a device without a desktop can
-// at least hold the data.
+// Prebuilt IME card assets (scripts/ime-assets.sh). Served from the ime-assets
+// branch (raw); same bytes can also be published as the ime-v1 GitHub Release.
 const Preset kPresets[] = {
-    {"Pinyin word list", "https://raw.githubusercontent.com/VanillaNahida/lvgl_pinyin_ime/"
-                         "1e2aa50840c838ebfb51e6e4756153f0084d52c3/data/dict/"
-                         "rawdict_utf16_65105_freq.txt",
-     kImeDir},
-    {"Pinyin valid chars", "https://raw.githubusercontent.com/VanillaNahida/lvgl_pinyin_ime/"
-                           "1e2aa50840c838ebfb51e6e4756153f0084d52c3/data/dict/"
-                           "valid_utf16.txt",
-     kImeDir},
+    {"IME: Chinese dict",
+     "https://raw.githubusercontent.com/mio-aotearoa/embedded/ime-assets/dict_pinyin.dat", kImeDir},
+    {"IME: Japanese SKK",
+     "https://raw.githubusercontent.com/mio-aotearoa/embedded/ime-assets/skk_mdic.bin", kImeDir},
+    {"IME: CJK font",
+     "https://raw.githubusercontent.com/mio-aotearoa/embedded/ime-assets/cjk14.bin", kImeDir},
 };
 constexpr int kPresetCount = (int)(sizeof(kPresets) / sizeof(kPresets[0]));
 
@@ -289,7 +286,15 @@ void DownloadApp::rowCb(lv_event_t *e)
 
     const Preset &p = kPresets[idx];
     char name[48];
-    fileNameFor(p.url, name, sizeof name);
+    // Canonical on-card names (SKK upstream file is ssk_mdic.bin).
+    if (strstr(p.url, "dict_pinyin.dat"))
+        snprintf(name, sizeof name, "dict_pinyin.dat");
+    else if (strstr(p.url, "ssk_mdic.bin") || strstr(p.url, "skk_mdic.bin"))
+        snprintf(name, sizeof name, "skk_mdic.bin");
+    else if (strstr(p.url, "cjk14.bin"))
+        snprintf(name, sizeof name, "cjk14.bin");
+    else
+        fileNameFor(p.url, name, sizeof name);
     s_active->startUrl(p.url, p.dir, name);
 }
 
@@ -301,9 +306,9 @@ void DownloadApp::taCb(lv_event_t *e)
 
     if (code == LV_EVENT_LONG_PRESSED)
     {
-        imeJaToggle();
-        app->setStatus(imeJaActive() ? TR("Japanese: romaji, Space = kana")
-                                     : TR("Type an http:// or https:// URL, then Download"));
+        imeModeCycle();
+        app->setStatus(imeMode() == IME_OFF ? TR("Type an http:// or https:// URL, then Download")
+                                            : imeModeStatus());
         return;
     }
     if (code == LV_EVENT_FOCUSED || code == LV_EVENT_CLICKED)

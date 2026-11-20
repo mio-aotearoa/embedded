@@ -14,7 +14,7 @@
 #include "app_toast.h"
 #include "http_download.h"  // Wi-Fi -> SD downloader shared with the ESP-AI page
 #include "i18n.h"        // TR()
-#include "ime_ja.h"     // romaji -> kana in wadamesh's typing path
+#include "ime_mode.h"   // Off / Japanese / Chinese IME cycle
 #include "psram_alloc.h"
 #include "url_util.h"   // bare host -> https://
 #include "zim_reader.h"  // ZIM v5/v6 parser (this folder)
@@ -585,10 +585,10 @@ void KiwixApp::fieldBindCb(lv_event_t* e)
 void KiwixApp::imeToggleCb(lv_event_t* e)
 {
     (void)e;
-    imeJaToggle();
+    imeModeCycle();
     if (s_active)
-        s_active->setStatus(imeJaActive() ? TR("Japanese: romaji, Space = kana")
-                                          : TR("Type a title prefix, then Enter"));
+        s_active->setStatus(imeMode() == IME_OFF ? TR("Type a title prefix, then Enter")
+                                                 : imeModeStatus());
 }
 
 // Defer catalogue navigation out of list-button event handlers: wiping the
