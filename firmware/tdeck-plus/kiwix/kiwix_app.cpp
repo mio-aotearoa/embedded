@@ -15,6 +15,7 @@
 #include "http_download.h"  // Wi-Fi -> SD downloader shared with the ESP-AI page
 #include "i18n.h"        // TR()
 #include "ime_ja.h"     // romaji -> kana in wadamesh's typing path
+#include "psram_alloc.h"
 #include "url_util.h"   // bare host -> https://
 #include "zim_reader.h"  // ZIM v5/v6 parser (this folder)
 #include "src/extra/libs/sjpg/tjpgd.h"  // wadamesh's JPEG decoder (same copy UITask uses)
@@ -23,7 +24,6 @@
 #include <SD.h>
 #include <WiFi.h>
 #include <ctype.h>
-#include <esp_heap_caps.h>
 #include <lvgl.h>
 
 #include <stdio.h>
@@ -99,7 +99,7 @@ static void imageTapCb(lv_event_t*)
     }
     if (s_imgBuf)
     {
-        heap_caps_free(s_imgBuf);
+        psramPreferFree(s_imgBuf);
         s_imgBuf = nullptr;
     }
     KiwixApp::dismiss();
@@ -136,11 +136,7 @@ static bool showArticleImage(ZimArchive& ar, const std::string& src, const ZimEn
         jpeg[0] != 0xFF || jpeg[1] != 0xD8) return false;
 
     static uint8_t* pool = nullptr;
-    if (!pool)
-    {
-        pool = (uint8_t*)heap_caps_malloc(4096, MALLOC_CAP_SPIRAM);
-        if (!pool) pool = (uint8_t*)heap_caps_malloc(4096, MALLOC_CAP_8BIT);
-    }
+    if (!pool) pool = (uint8_t*)psramPreferAlloc(4096);
     if (!pool) return false;
     JpgIo io{jpeg.data(), jpeg.size(), 0, nullptr, 0, 0};
     JDEC jd;
@@ -150,13 +146,12 @@ static bool showArticleImage(ZimArchive& ar, const std::string& src, const ZimEn
     while (scale < 3 && (((int)jd.width >> scale) > maxDim || ((int)jd.height >> scale) > maxDim)) ++scale;
     const int ow = (int)jd.width >> scale, oh = (int)jd.height >> scale;
     if (ow <= 0 || oh <= 0 || ow > maxDim || oh > maxDim) return false;
-    s_imgBuf = (uint8_t*)heap_caps_malloc((size_t)ow * oh * 2, MALLOC_CAP_SPIRAM);
-    if (!s_imgBuf) s_imgBuf = (uint8_t*)heap_caps_malloc((size_t)ow * oh * 2, MALLOC_CAP_8BIT);
+    s_imgBuf = (uint8_t*)psramPreferAlloc((size_t)ow * oh * 2);
     if (!s_imgBuf) return false;
     io.out = (uint16_t*)s_imgBuf; io.ow = ow; io.oh = oh;
     if (jd_decomp(&jd, jpgOut, (uint8_t)scale) != JDR_OK)
     {
-        heap_caps_free(s_imgBuf); s_imgBuf = nullptr;
+        psramPreferFree(s_imgBuf); s_imgBuf = nullptr;
         return false;
     }
 
@@ -394,7 +389,7 @@ void KiwixApp::close(void)
     }
     if (s_imgBuf)
     {
-        heap_caps_free(s_imgBuf);
+        psramPreferFree(s_imgBuf);
         s_imgBuf = nullptr;
     }
 }

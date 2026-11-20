@@ -40,13 +40,13 @@ When adding or changing firmware apps:
 
 | App | Reuse |
 |---|---|
-| Kiwix | Own ZIM subset + `third_party/zstd`; Reader; `http_fetch` / `http_download` |
-| ESP-AI | `third_party/esp32-ai` + `LLM_DEQ_ROW`; `http_download` |
-| Browser | TactileBrowser/Lexbor + Duktape; `http_fetch` |
-| LocalSend | Protocol v2 + ArduinoJson + WiFi/HTTPClient |
+| Kiwix | ZIM subset + zstd; Reader; `http_fetch` / `http_download`; `psram_alloc` |
+| ESP-AI | `esp32-ai` + `LLM_DEQ_ROW`; `http_download`; `task_spawn` |
+| Browser | Lexbor + Duktape; `http_fetch`; `psram_alloc` |
+| LocalSend | Protocol v2 + ArduinoJson; `sd_atomic` |
 | Download | `http_download` + `url_util` |
 | Elements | NeoCalculator `ChemDatabase.h` |
-| OutRun / Voxel | Submodule engines + hosts; `game_canvas` |
+| OutRun / Voxel | Submodule engines; `game_canvas` + `game_steer` |
 
 ## Docs
 
