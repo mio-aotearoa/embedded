@@ -1,30 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "http_fetch.h"
+#include "psram_alloc.h"
 
 #include <WiFi.h>
-#include <esp_heap_caps.h>
 #include <mbedtls/platform.h>
 
 #include <stdio.h>
 #include <string.h>
 
-namespace
-{
-void *tlsPsramCalloc(size_t n, size_t size)
-{
-    void *p = heap_caps_calloc(n, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!p) p = heap_caps_calloc(n, size, MALLOC_CAP_8BIT);
-    return p;
-}
-
-void tlsPsramFree(void *p) { heap_caps_free(p); }
-}  // namespace
-
 void httpTlsUsePsram(void)
 {
     static bool done = false;
     if (done) return;
-    mbedtls_platform_set_calloc_free(tlsPsramCalloc, tlsPsramFree);
+    mbedtls_platform_set_calloc_free(psramPreferCalloc, psramPreferFree);
     done = true;
 }
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "TFT_eSPI.h"
+#include "psram_alloc.h"
 
-#include <esp_heap_caps.h>
 #include <math.h>
 #include <stdio.h>
 
@@ -10,8 +10,7 @@ void* TFT_eSprite::createSprite(int16_t w, int16_t h)
     deleteSprite();
     if (w <= 0 || h <= 0) return nullptr;
     const size_t bytes = (size_t)w * (size_t)h * sizeof(uint16_t);
-    _buf = (uint16_t*)heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!_buf) _buf = (uint16_t*)heap_caps_malloc(bytes, MALLOC_CAP_8BIT);
+    _buf = (uint16_t*)psramPreferAlloc(bytes);
     if (!_buf) return nullptr;
     _w = w;
     _h = h;
@@ -23,7 +22,7 @@ void* TFT_eSprite::createSprite(int16_t w, int16_t h)
 
 void TFT_eSprite::deleteSprite()
 {
-    if (_owned && _buf) heap_caps_free(_buf);
+    if (_owned && _buf) psramPreferFree(_buf);
     _buf = nullptr;
     _w = _h = 0;
     _owned = false;

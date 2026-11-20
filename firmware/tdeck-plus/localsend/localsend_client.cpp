@@ -3,6 +3,9 @@
 // LocalSend protocol v2 over plain HTTP. See localsend_client.h for scope.
 #include "localsend_client.h"
 
+#include "psram_alloc.h"
+#include "sd_atomic.h"
+
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
@@ -51,18 +54,13 @@ struct RecvSession
 };
 RecvSession s_session = {};
 
-// Prefer PSRAM for JsonDocument (same pattern as wadamesh MyMesh backup import).
 struct LsJsonAlloc : ArduinoJson::Allocator
 {
-    void *allocate(size_t n) override
-    {
-        void *p = heap_caps_malloc(n, MALLOC_CAP_SPIRAM);
-        return p ? p : malloc(n);
-    }
-    void deallocate(void *p) override { heap_caps_free(p); }
+    void *allocate(size_t n) override { return psramPreferAlloc(n); }
+    void deallocate(void *p) override { psramPreferFree(p); }
     void *reallocate(void *p, size_t n) override
     {
-        void *q = heap_caps_realloc(p, n, MALLOC_CAP_SPIRAM);
+        void *q = heap_caps_realloc(p, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         return q ? q : realloc(p, n);
     }
 };
@@ -458,15 +456,12 @@ void handleUpload(WiFiClient &c, const char *path, size_t contentLength, const I
 
     SD.mkdir("/localsend");
     char dest[96];
-    char tmp[104];
     snprintf(dest, sizeof dest, "/localsend/%s", s_session.fileName);
-    snprintf(tmp, sizeof tmp, "%s.part", dest);
 
-    File out = SD.open(tmp, FILE_WRITE);
-    if (!out)
+    SdAtomicFile out;
+    if (!out.begin(dest, s_recv.err, sizeof s_recv.err))
     {
         httpRespond(c, 500, "text/plain", "sd open failed");
-        snprintf(s_recv.err, sizeof s_recv.err, "%s", "Cannot write to the SD card");
         s_recv.done = true;
         s_recv.ok = false;
         clearSession();
@@ -480,7 +475,6 @@ void handleUpload(WiFiClient &c, const char *path, size_t contentLength, const I
     s_recv.total = (uint32_t)contentLength;
     s_recv.err[0] = 0;
 
-    // Headers already consumed; stream the body.
     uint8_t buf[kChunk];
     size_t left = contentLength;
     bool ok = true;
@@ -506,30 +500,22 @@ void handleUpload(WiFiClient &c, const char *path, size_t contentLength, const I
             ok = false;
             break;
         }
-        if (out.write(buf, (size_t)got) != (size_t)got)
+        if (!out.write(buf, (size_t)got, s_recv.err, sizeof s_recv.err))
         {
             ok = false;
-            snprintf(s_recv.err, sizeof s_recv.err, "%s", "SD write failed");
             break;
         }
         left -= (size_t)got;
         s_recv.received = (uint32_t)(contentLength - left);
     }
-    out.close();
 
     if (ok && left == 0)
     {
-        SD.remove(dest);
-        if (!SD.rename(tmp, dest))
-        {
-            ok = false;
-            snprintf(s_recv.err, sizeof s_recv.err, "%s", "Cannot finalise the file");
-            SD.remove(tmp);
-        }
+        if (!out.commit(s_recv.err, sizeof s_recv.err)) ok = false;
     }
     else
     {
-        SD.remove(tmp);
+        out.abort();
         if (!s_recv.err[0])
             snprintf(s_recv.err, sizeof s_recv.err, "%s",
                      s_recvWant ? "Transfer incomplete" : "Cancelled");

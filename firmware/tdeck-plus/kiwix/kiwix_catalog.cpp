@@ -2,10 +2,10 @@
 #include "kiwix_catalog.h"
 
 #include "http_fetch.h"
+#include "task_spawn.h"
 
 #include <Arduino.h>
 #include <WiFi.h>
-#include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
@@ -165,9 +165,7 @@ char s_dir[192];
 char s_pending[192];
 volatile bool s_have_pending = false;
 TaskHandle_t s_task = nullptr;
-StaticTask_t* s_tcb = nullptr;
-StackType_t* s_stack = nullptr;
-uint32_t s_stackBytes = 0;
+StaticTaskMem s_mem{};
 
 void fetchOne(const char* leaf, std::vector<KiwixCatalogItem>& items, char* err, size_t errLen,
               bool& ok)
@@ -239,52 +237,9 @@ void catalogTask(void*)
 
 bool spawnCatalogTask(void)
 {
-    if (s_task) return true;
-
-    if (!s_tcb)
-    {
-        s_tcb = (StaticTask_t*)heap_caps_malloc(sizeof(StaticTask_t),
-                                                MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    }
-    if (!s_stack)
-    {
-        // Prefer internal RAM (TLS is happier there). Same size ladder as the
-        // ESP-AI gen worker — 16 KB contiguous often does not exist late in UI
-        // life, but 8–12 KB still does.
-        static const uint32_t kSizes[] = {12 * 1024, 10 * 1024, 8 * 1024, 6 * 1024};
-        for (uint32_t sz : kSizes)
-        {
-            s_stack = (StackType_t*)heap_caps_malloc(sz, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-            if (s_stack)
-            {
-                s_stackBytes = sz;
-                break;
-            }
-        }
-        if (!s_stack)
-        {
-            for (uint32_t sz : kSizes)
-            {
-                s_stack = (StackType_t*)heap_caps_malloc(sz, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-                if (s_stack)
-                {
-                    s_stackBytes = sz;
-                    break;
-                }
-            }
-        }
-    }
-    if (!s_tcb || !s_stack) return false;
-
-    s_task = xTaskCreateStaticPinnedToCore(
-        catalogTask, "kicat", s_stackBytes / sizeof(StackType_t), nullptr, 4, s_stack, s_tcb, 0);
-    if (!s_task) return false;
-
-    Serial.printf("[kicat] stack %u B (free_int=%u max=%u psram=%u)\n",
-                  (unsigned)s_stackBytes, (unsigned)ESP.getFreeHeap(),
-                  (unsigned)ESP.getMaxAllocHeap(),
-                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
-    return true;
+    static const uint32_t kSizes[] = {12 * 1024, 10 * 1024, 8 * 1024, 6 * 1024};
+    return staticTaskSpawn(&s_task, &s_mem, catalogTask, "kicat", nullptr, 4, 0, kSizes,
+                           sizeof kSizes / sizeof kSizes[0], "kicat") != nullptr;
 }
 }  // namespace
 

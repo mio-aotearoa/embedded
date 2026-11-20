@@ -28,11 +28,10 @@ integration is `patches/wadamesh/` only (no fork of UI/radio logic).
 | Elements | NeoCalculator `ChemDatabase.h` grid |
 | OutRun / Voxel | Submodule engines + AppPage hosts; 1:1 RGB565, no stretch |
 
-`common/http_fetch.cpp`: shared HTTP(S) GET with manual redirects + TLS buffers
-in PSRAM (used by downloads, Kiwix catalogue, Browser).
-`common/http_download.cpp`: one transfer to SD (`.part` then rename) on top of
-`http_fetch`, polled from LVGL timers.
-`common/app_toast.h` → `wadameshShowAlert` (sys layer, visible over AppPages).
+Shared under `firmware/tdeck-plus/common/`: `http_fetch` (HTTPS+redirects),
+`http_download` + `sd_atomic` (`.part` then rename), `task_spawn` (static
+worker ladder), `psram_alloc`, `game_steer` (OutRun/Voxel L/R hold),
+`game_canvas`, `app_toast` → `wadameshShowAlert`.
 
 Wi‑Fi: Settings → Battery → “Wi‑Fi off on battery” (default on) holds
 `wifiConfigWantsWifi()` while unplugged without rewriting the radio toggle.

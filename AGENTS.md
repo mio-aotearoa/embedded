@@ -8,11 +8,11 @@ When adding or changing firmware apps:
    wadamesh `lib_deps` library, or a well-known open-source piece (protocol
    spec + established parser) over a new naive implementation.
 2. **Share common code inside this firmware.** Do not copy the same helper into
-   multiple apps. Put shared behaviour under `firmware/tdeck-plus/common/`
-   (e.g. `http_fetch` for HTTPS+redirects, `http_download` for SD transfers,
-   `url_util`, `app_toast`, `game_canvas`) and call it from Kiwix / Browser /
-   Download / ESP-AI / games. If you are about to paste a second copy of a
-   TLS/redirect/URL/JSON loop, extract it instead.
+   multiple apps. Put shared behaviour under `firmware/tdeck-plus/common/` and
+   call it from the apps. Current shared pieces: `http_fetch`, `http_download`,
+   `sd_atomic`, `task_spawn`, `psram_alloc`, `game_steer`, `game_canvas`,
+   `url_util`, `app_toast`, `cpu_boost`. If you are about to paste a second
+   copy of a TLS/redirect/URL/JSON/task-spawn/steer loop, extract it instead.
 3. **Do not invent stubs.** Drawer apps must be real: launch, UI, and the
    underlying work (parse / transfer / render / game tick). Caps and
    documented limits are fine; empty handlers and fake success are not.

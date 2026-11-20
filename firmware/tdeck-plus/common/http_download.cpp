@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "http_download.h"
 #include "http_fetch.h"
-#include "meshcomod_sd_io.h"
+#include "sd_atomic.h"
+#include "task_spawn.h"
 
 #include <Arduino.h>
-#include <SD.h>
 #include <WiFi.h>
 #include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
@@ -17,16 +17,11 @@ namespace
 {
 HttpDownloadState s_state;
 TaskHandle_t s_task = nullptr;
-StaticTask_t *s_tcb = nullptr;
-StackType_t *s_stack = nullptr;
-uint32_t s_stackBytes = 0;
+StaticTaskMem s_mem{};
 volatile bool s_cancel = false;
 
-// Hugging Face 302s to a signed CDN URL that is ~1.1 KB; 320 B truncated it and
-// the next hop then failed as HTTP -1 ("connection refused").
 char s_url[1536];
 char s_dest[192];
-char s_tmp[208];
 uint64_t s_expected = 0;
 
 void setError(const char *msg)
@@ -39,14 +34,6 @@ void finish(bool ok)
     s_state.ok = ok;
     s_state.running = false;
     s_state.done = true;
-}
-
-void removePartial()
-{
-    if (s_tmp[0])
-    {
-        SD.remove(s_tmp);
-    }
 }
 
 void runOneDownload(void)
@@ -77,36 +64,14 @@ void runOneDownload(void)
     s_state.total = length > 0 ? (uint64_t)length : 0;
     Serial.printf("[httpdl] GET 200 url_len=%u len=%d\n", (unsigned)strlen(current), length);
 
-    // Ensure parent dirs exist (callers mkdir too; do it here so a bad path
-    // still fails with a clear log rather than a bare open error).
+    SdAtomicFile out;
+    if (!out.begin(s_dest, s_state.err, sizeof s_state.err))
     {
-        char dir[160];
-        snprintf(dir, sizeof dir, "%s", s_tmp);
-        char *slash = strrchr(dir, '/');
-        if (slash && slash != dir)
-        {
-            *slash = 0;
-            for (char *p = dir + 1; *p; ++p)
-            {
-                if (*p != '/') continue;
-                *p = 0;
-                SD.mkdir(dir);
-                *p = '/';
-            }
-            SD.mkdir(dir);
-            meshcomodMarkSdIo();
-        }
-    }
-    File out = SD.open(s_tmp, FILE_WRITE);
-    if (!out)
-    {
-        Serial.printf("[httpdl] SD.open('%s') failed\n", s_tmp);
-        setError("cannot write to the SD card");
+        Serial.printf("[httpdl] open part failed: %s\n", s_state.err);
         fetch.close();
         finish(false);
         return;
     }
-    meshcomodMarkSdIo();
 
     uint8_t buf[1024];
     WiFiClient *stream = fetch.stream();
@@ -135,26 +100,16 @@ void runOneDownload(void)
         }
         const size_t want = available > sizeof buf ? sizeof buf : available;
         const int got = stream->readBytes(buf, want);
-        if (got <= 0)
+        if (got <= 0) break;
+        if (!out.write(buf, (size_t)got, s_state.err, sizeof s_state.err))
         {
-            break;
-        }
-        if (out.write(buf, (size_t)got) != (size_t)got)
-        {
-            setError("SD write failed");
             failed = true;
             break;
         }
-        meshcomodMarkSdIo();
         s_state.bytes += (uint64_t)got;
-        if (remaining > 0)
-        {
-            remaining -= got;
-        }
+        if (remaining > 0) remaining -= got;
     }
 
-    out.close();
-    meshcomodMarkSdIo();
     fetch.close();
 
     if (!failed && remaining > 0)
@@ -170,26 +125,19 @@ void runOneDownload(void)
 
     if (failed)
     {
-        removePartial();
+        out.abort();
         s_state.bytes = 0;
         finish(false);
         return;
     }
-
-    SD.remove(s_dest);
-    if (!SD.rename(s_tmp, s_dest))
+    if (!out.commit(s_state.err, sizeof s_state.err))
     {
-        setError("cannot rename the finished download");
-        removePartial();
         finish(false);
         return;
     }
-    meshcomodMarkSdIo();
     finish(true);
 }
 
-// Long-lived worker: reserve the stack once with xTaskCreateStatic. A fresh
-// xTaskCreate(24 KB) fails once LVGL has fragmented internal heap.
 void downloadTask(void *)
 {
     httpTlsUsePsram();
@@ -202,52 +150,10 @@ void downloadTask(void *)
 
 bool spawnDownloadTask(void)
 {
-    if (s_task) return true;
-
-    if (!s_tcb)
-    {
-        s_tcb = (StaticTask_t *)heap_caps_malloc(sizeof(StaticTask_t),
-                                                 MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    }
-    if (!s_stack)
-    {
-        // Prefer internal RAM (TLS handshakes are happier there). Ladder down if
-        // the UI already ate the big contiguous blocks.
-        static const uint32_t kSizes[] = {20 * 1024, 16 * 1024, 12 * 1024, 10 * 1024};
-        for (uint32_t sz : kSizes)
-        {
-            s_stack = (StackType_t *)heap_caps_malloc(sz, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-            if (s_stack)
-            {
-                s_stackBytes = sz;
-                break;
-            }
-        }
-        if (!s_stack)
-        {
-            for (uint32_t sz : kSizes)
-            {
-                s_stack = (StackType_t *)heap_caps_malloc(sz, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-                if (s_stack)
-                {
-                    s_stackBytes = sz;
-                    break;
-                }
-            }
-        }
-    }
-    if (!s_tcb || !s_stack) return false;
-
-    // Pin to core 0 with Wi-Fi/LwIP: TLS from the other core often returns HTTP -1.
-    s_task = xTaskCreateStaticPinnedToCore(downloadTask, "httpdl",
-                                           s_stackBytes / sizeof(StackType_t), nullptr, 4,
-                                           s_stack, s_tcb, 0);
-    if (!s_task) return false;
-    Serial.printf("[httpdl] stack %u B (free_int=%u max=%u psram=%u)\n",
-                  (unsigned)s_stackBytes, (unsigned)ESP.getFreeHeap(),
-                  (unsigned)ESP.getMaxAllocHeap(),
-                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
-    return true;
+    static const uint32_t kSizes[] = {20 * 1024, 16 * 1024, 12 * 1024, 10 * 1024};
+    // Core 0 with Wi-Fi/LwIP: TLS from the other core often returns HTTP -1.
+    return staticTaskSpawn(&s_task, &s_mem, downloadTask, "httpdl", nullptr, 4, 0, kSizes,
+                           sizeof kSizes / sizeof kSizes[0], "httpdl") != nullptr;
 }
 }  // namespace
 
@@ -272,7 +178,7 @@ bool httpDownloadStart(const char *url, const char *destPath, uint64_t expectedS
         setError("URL is too long");
         return false;
     }
-    if (strlen(destPath) >= sizeof s_dest || strlen(destPath) + 5 >= sizeof s_tmp)
+    if (strlen(destPath) >= sizeof s_dest || strlen(destPath) + 5 >= 200)
     {
         setError("destination path is too long");
         return false;
@@ -280,7 +186,6 @@ bool httpDownloadStart(const char *url, const char *destPath, uint64_t expectedS
 
     snprintf(s_url, sizeof s_url, "%s", url);
     snprintf(s_dest, sizeof s_dest, "%s", destPath);
-    snprintf(s_tmp, sizeof s_tmp, "%s.part", s_dest);
     s_expected = expectedSize;
     s_cancel = false;
 

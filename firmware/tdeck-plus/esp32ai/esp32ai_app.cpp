@@ -10,13 +10,12 @@
 #include "http_download.h"
 #include "i18n.h"
 #include "llm_port.h"
+#include "task_spawn.h"
 
 #include <Arduino.h>
 #include <SD.h>
 #include <WiFi.h>
 #include <esp_heap_caps.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
 #include <lvgl.h>
 
 #include <stdio.h>
@@ -156,16 +155,16 @@ void Esp32AiApp::close(void)
         vTaskDelay(pdMS_TO_TICKS(20));
     }
     esp32aiUnload();
-    if (genStack_)
+    if (genMem_.stack)
     {
-        heap_caps_free(genStack_);
-        genStack_ = nullptr;
-        genStackBytes_ = 0;
+        heap_caps_free(genMem_.stack);
+        genMem_.stack = nullptr;
+        genMem_.stackBytes = 0;
     }
-    if (genTcb_)
+    if (genMem_.tcb)
     {
-        heap_caps_free(genTcb_);
-        genTcb_ = nullptr;
+        heap_caps_free(genMem_.tcb);
+        genMem_.tcb = nullptr;
     }
     appPageEnd(&Esp32AiApp::dismiss);
     appPageDeleteRootAsync(root_);
@@ -357,44 +356,16 @@ void Esp32AiApp::showChat(void)
     addChatMessage("ESP-AI", TR("Chat ready. Type a message (ASCII)."), false);
     setStatus(TR("On-device TinyStories \xE2\x80\x94 replies stream live"));
 
-    // Reserve + spawn the worker before EnsureLoaded pulls activation scratch
-    // into internal SRAM — otherwise a dynamic xTaskCreate cannot find a block.
+    // Reserve + spawn before EnsureLoaded eats internal SRAM for activations.
     if (!genHandle_)
     {
-        if (!genTcb_)
-        {
-            genTcb_ = (StaticTask_t *)heap_caps_malloc(sizeof(StaticTask_t),
-                                                       MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        }
-        if (!genStack_)
-        {
-            static const uint32_t kSizes[] = {12 * 1024, 10 * 1024, 8 * 1024};
-            for (uint32_t sz : kSizes)
-            {
-                genStack_ = (StackType_t *)heap_caps_malloc(sz, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-                if (genStack_)
-                {
-                    genStackBytes_ = sz;
-                    break;
-                }
-            }
-        }
-        if (!genTcb_ || !genStack_)
+        static const uint32_t kSizes[] = {12 * 1024, 10 * 1024, 8 * 1024};
+        if (!staticTaskSpawn(&genHandle_, &genMem_, genTask, "esp32ai-gen", this, 2, 0, kSizes,
+                             sizeof kSizes / sizeof kSizes[0], "esp32ai"))
         {
             notify(TR("No RAM for generation task"));
             return;
         }
-        genHandle_ = xTaskCreateStaticPinnedToCore(
-            genTask, "esp32ai-gen", genStackBytes_ / sizeof(StackType_t), this, 2, genStack_,
-            genTcb_, 0);
-        if (!genHandle_)
-        {
-            notify(TR("Cannot start generation task"));
-            return;
-        }
-        Serial.printf("[esp32ai] gen task stack %u B (free_int=%u max=%u)\n",
-                      (unsigned)genStackBytes_, (unsigned)ESP.getFreeHeap(),
-                      (unsigned)ESP.getMaxAllocHeap());
     }
 
     char err[96];

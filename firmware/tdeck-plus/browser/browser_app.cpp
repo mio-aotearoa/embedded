@@ -15,6 +15,7 @@
 #include "cpu_boost.h"
 #include "http_fetch.h"
 #include "i18n.h"
+#include "psram_alloc.h"
 #include "url_util.h"   // bare host -> https://
 #include "ime_ja.h"
 #include "tactilebrowser_core.h"
@@ -25,7 +26,6 @@
 #include <WiFi.h>
 #include <lvgl.h>
 
-#include <esp_heap_caps.h>
 #include <lexbor/core/lexbor.h>
 
 #include <stdio.h>
@@ -34,48 +34,14 @@
 
 namespace
 {
-// ---- allocator ------------------------------------------------------------
-// Lexbor's default allocator is plain malloc, which on this Arduino/IDF build
-// serves INTERNAL RAM only. A real page's DOM is several times its markup, so
-// the parse ran out of internal RAM and returned RENDER_ERROR_PARSE. Point
-// Lexbor at PSRAM (internal RAM stays for radio/TLS), falling back to internal
-// only if PSRAM is exhausted.
-void *lxbAlloc(size_t n)
-{
-    if (n == 0) n = 1;
-    void *p = heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    return p ? p : heap_caps_malloc(n, MALLOC_CAP_8BIT);
-}
-
-void *lxbRealloc(void *dst, size_t n)
-{
-    if (!dst) return lxbAlloc(n);
-    void *p = lxbAlloc(n);
-    if (!p) return nullptr;
-    const size_t old = heap_caps_get_allocated_size(dst);
-    memcpy(p, dst, old < n ? old : n);
-    heap_caps_free(dst);
-    return p;
-}
-
-void *lxbCalloc(size_t num, size_t size)
-{
-    if (size && num > (size_t)-1 / size) return nullptr;
-    const size_t n = num * size;
-    void *p = lxbAlloc(n);
-    if (p) memset(p, 0, n);
-    return p;
-}
-
-void lxbFree(void *p) { heap_caps_free(p); }
-
-// Idempotent: must run before the first Lexbor allocation (css_parser_init()).
+// Lexbor default malloc is internal-only; DOM needs PSRAM (see psram_alloc).
 void lexborUsePsram()
 {
     static bool done = false;
     if (!done)
     {
-        done = lexbor_memory_setup(lxbAlloc, lxbRealloc, lxbCalloc, lxbFree) == LXB_STATUS_OK;
+        done = lexbor_memory_setup(psramPreferAlloc, psramPreferRealloc, psramPreferCalloc,
+                                   psramPreferFree) == LXB_STATUS_OK;
     }
 }
 

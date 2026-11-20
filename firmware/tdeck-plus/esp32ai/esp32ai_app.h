@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
+#include "task_spawn.h"
+
 #include <lvgl.h>
 
 // esp32-ai TinyStories on the T-Deck Plus.
@@ -64,10 +64,7 @@ class Esp32AiApp
     char genOut_[1600] = {};
     char prompt_[256] = {};
 
-    // Persistent worker. TCB + stack must be internal SRAM — Esp32AiApp itself
-    // may live in PSRAM, and xPortCheckValidTCBMem rejects external TCB memory.
-    StackType_t *genStack_ = nullptr;
-    StaticTask_t *genTcb_ = nullptr;
+    // Persistent worker via common/task_spawn (TCB prefers internal SRAM).
     TaskHandle_t genHandle_ = nullptr;
-    uint32_t genStackBytes_ = 0;
+    StaticTaskMem genMem_{};
 };
