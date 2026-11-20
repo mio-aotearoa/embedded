@@ -17,7 +17,8 @@ PlatformIO env by `patches/wadamesh/`.
 | OutRun | `arcade3d/` | host + TFT shim; engine submodule |
 | Voxel Flight | `voxel_flight/` | host; engine submodule |
 
-Shared: `common/http_download.*`, `common/app_toast.h`, `common/game_canvas.h`.
+Shared: `common/http_fetch.*` (HTTPS+redirects), `common/http_download.*`,
+`common/url_util.h`, `common/app_toast.h`, `common/game_canvas.h`.
 
 ## Layout
 

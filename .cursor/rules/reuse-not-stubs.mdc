@@ -9,7 +9,10 @@ Follow root `AGENTS.md`.
 
 - Prefer `third_party/` pins, wadamesh `lib_deps` (e.g. ArduinoJson), or known
   open-source over naive homemade parsers/servers.
+- **Share inside the firmware:** put duplicated helpers in
+  `firmware/tdeck-plus/common/` (`http_fetch`, `http_download`, …); do not
+  paste the same TLS/redirect/URL loop into each app.
 - Apps must be real (no empty launches / fake success).
 - Engines: submodule + patch + thin host — do not vendor into `firmware/`.
-- Share `common/http_download` for HTTP(S)→SD; do not hand-roll JSON.
+- Do not hand-roll JSON when ArduinoJson is available.
 - Patches: no pure-format diffs.

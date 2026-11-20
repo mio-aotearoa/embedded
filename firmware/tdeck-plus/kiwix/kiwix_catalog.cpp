@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "kiwix_catalog.h"
 
+#include "http_fetch.h"
+
 #include <Arduino.h>
-#include <HTTPClient.h>
 #include <WiFi.h>
-#include <WiFiClientSecure.h>
 #include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-#include <mbedtls/platform.h>
 
 #include <algorithm>
 #include <ctype.h>
@@ -26,132 +25,45 @@ namespace
 constexpr const char* kBase = "https://ftp.fau.de/kiwix/zim/";
 constexpr size_t kMaxListing = 64 * 1024;  // the biggest folder index is far below this
 constexpr size_t kMaxItems = 80;
-constexpr int kMaxHops = 4;
 
-// Same TLS-buffer workaround as http_download: Arduino-ESP32 mbedtls wants
-// ~32 KB contiguous internal RAM; with the UI up that fails as HTTP -1.
-void* tlsPsramCalloc(size_t n, size_t size)
-{
-    void* p = heap_caps_calloc(n, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!p) p = heap_caps_calloc(n, size, MALLOC_CAP_8BIT);
-    return p;
-}
-
-void tlsPsramFree(void* p) { heap_caps_free(p); }
-
-// GET `url` into `body`, following up to kMaxHops redirects (absolute or relative).
+// GET `url` into `body` via shared HttpFetch (manual redirects + TLS-in-PSRAM).
 bool readPageOnce(const char* url, std::string& body, char* err, size_t errLen)
 {
-    String current(url);
-    for (int hop = 0; hop <= kMaxHops; ++hop)
+    char current[1536];
+    snprintf(current, sizeof current, "%s", url);
+    HttpFetch fetch;
+    if (!fetch.openGet(current, current, sizeof current, err, errLen,
+                       /*connectTimeoutMs=*/20000, /*readTimeoutMs=*/20000, /*maxHops=*/4))
     {
-        HTTPClient http;
-        WiFiClientSecure* tls = nullptr;
-        WiFiClient* plain = nullptr;
-        http.setReuse(false);
-        http.setConnectTimeout(20000);
-        http.setTimeout(20000);
-        http.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
-        http.setUserAgent("wadamesh-tdeck");
+        return false;
+    }
 
-        bool began = false;
-        if (current.startsWith("https://"))
+    WiFiClient* stream = fetch.stream();
+    body.clear();
+    uint32_t last = millis();
+    while (body.size() < kMaxListing)
+    {
+        const size_t avail = stream ? (size_t)stream->available() : 0;
+        if (!avail)
         {
-            tls = new WiFiClientSecure();
-            if (!tls)
-            {
-                snprintf(err, errLen, "out of memory for TLS");
-                return false;
-            }
-            tls->setInsecure();  // no cert store on the device
-            tls->setHandshakeTimeout(45);
-            began = http.begin(*tls, current);
-        }
-        else
-        {
-            plain = new WiFiClient();
-            if (!plain)
-            {
-                snprintf(err, errLen, "out of memory for TCP");
-                return false;
-            }
-            began = http.begin(*plain, current);
-        }
-        if (!began)
-        {
-            delete tls;
-            delete plain;
-            snprintf(err, errLen, "cannot parse the catalogue URL");
-            return false;
-        }
-
-        http.addHeader("Accept-Encoding", "identity");
-        const int code = http.GET();
-        if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308)
-        {
-            // getLocation() — header("Location") is empty without collectHeaders().
-            String loc = http.getLocation();
-            http.end();
-            delete tls;
-            delete plain;
-            if (!loc.length())
-            {
-                snprintf(err, errLen, "catalogue redirect without a Location");
-                return false;
-            }
-            if (loc.startsWith("http"))
-            {
-                current = loc;
-            }
-            else
-            {
-                const int scheme = current.indexOf("://");
-                const int slash = current.indexOf('/', scheme < 0 ? 0 : scheme + 3);
-                current = (slash < 0 ? current : current.substring(0, slash)) + loc;
-            }
+            if (!fetch.client().connected() || millis() - last > 20000) break;
+            delay(2);
             continue;
         }
-        if (code != 200)
-        {
-            snprintf(err, errLen, "HTTP %d (%s) from the catalogue", code,
-                     HTTPClient::errorToString(code).c_str());
-            http.end();
-            delete tls;
-            delete plain;
-            return false;
-        }
-
-        WiFiClient* stream = http.getStreamPtr();
-        body.clear();
-        uint32_t last = millis();
-        while (body.size() < kMaxListing)
-        {
-            const size_t avail = stream ? (size_t)stream->available() : 0;
-            if (!avail)
-            {
-                if (!http.connected() || millis() - last > 20000) break;
-                delay(2);
-                continue;
-            }
-            last = millis();
-            char buf[512];
-            const size_t want = avail > sizeof buf ? sizeof buf : avail;
-            const int got = stream->readBytes(buf, want);
-            if (got <= 0) break;
-            body.append(buf, (size_t)got);
-        }
-        http.end();
-        delete tls;
-        delete plain;
-        if (body.empty())
-        {
-            snprintf(err, errLen, "the catalogue is empty");
-            return false;
-        }
-        return true;
+        last = millis();
+        char buf[512];
+        const size_t want = avail > sizeof buf ? sizeof buf : avail;
+        const int got = stream->readBytes(buf, want);
+        if (got <= 0) break;
+        body.append(buf, (size_t)got);
     }
-    snprintf(err, errLen, "too many catalogue redirects");
-    return false;
+    fetch.close();
+    if (body.empty())
+    {
+        snprintf(err, errLen, "the catalogue is empty");
+        return false;
+    }
+    return true;
 }
 
 // One retry on top of readPageOnce. The page is opened right after Wi-Fi comes
@@ -290,8 +202,7 @@ void fetchOne(const char* leaf, std::vector<KiwixCatalogItem>& items, char* err,
 // fragmented internal heap ("out of memory for catalogue task").
 void catalogTask(void*)
 {
-    mbedtls_platform_set_calloc_free(tlsPsramCalloc, tlsPsramFree);
-
+    httpTlsUsePsram();
     for (;;)
     {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);

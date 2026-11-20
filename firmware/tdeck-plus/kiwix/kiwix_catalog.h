@@ -33,8 +33,7 @@ struct KiwixCatalogState
 // If a fetch is already running, the path is queued and replaces any previous
 // pending path (the worker picks it up when the current hop finishes). Returns
 // false only when the arguments are bad or the worker task cannot be created.
-// Redirects are followed by hand via getLocation(): HTTPClient cannot re-connect
-// an explicit WiFiClientSecure across hosts (shows up as HTTP -1).
+// HTTPS uses shared common/http_fetch (manual redirects + TLS in PSRAM).
 // Spawn the long-lived worker early (e.g. when the Kiwix page opens), while a
 // contiguous internal block for its stack is still available. Safe to call
 // repeatedly; returns false only when no stack could be allocated.
