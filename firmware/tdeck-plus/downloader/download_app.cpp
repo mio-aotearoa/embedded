@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // On-device downloader: type a URL, pick a destination folder, watch the bytes
-// land on the SD card. The transfer itself is firmware/tdeck-plus/common/
-// http_download.cpp (HTTPClient GET, TLS setInsecure, .part + rename), so this
-// page only owns the URL field, the keyboard, the presets and the progress line.
+// land on the SD card. The transfer is common/http_download (on top of shared
+// http_fetch for HTTPS+redirects; .part then rename), so this page only owns
+// the URL field, keyboard, presets and progress line.
 #include "download_app.h"
 
 #include "AppPage.h"

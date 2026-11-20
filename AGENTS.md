@@ -31,9 +31,10 @@ When adding or changing firmware apps:
 7. **Heavy desktop stacks stay out** (full libzim, librime, ONNX mesh-image
    codec). Document the limit; ship a subset or store-and-forward instead of a
    fake port.
-8. **Patches:** no pure formatting-only diffs. Rebase with
-   `scripts/patches.sh`; keep series slim. nixfmt when editing nix, but
-   functional goals beat format churn.
+8. **Patches / nixfmt:** patch series must not include purely formatting-only
+   diffs. Rebase with `scripts/patches.sh`; keep series slim. When editing
+   `.nix` files, run **nixfmt** in general — that rule can relax when a more
+   important goal conflicts (e.g. keeping a patch free of format-only noise).
 
 ## App map (expected reuse)
 
