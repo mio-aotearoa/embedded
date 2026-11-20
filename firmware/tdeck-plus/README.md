@@ -11,7 +11,7 @@ PlatformIO env by `patches/wadamesh/`.
 | ESP-AI | `esp32ai/` | TinyStories from SD (`third_party/esp32-ai`) |
 | Browser | `browser/` | Lexbor (TactileBrowser core) + Duktape inline JS |
 | Web | upstream | wadamesh Reader (text extract) |
-| LocalSend | `localsend/` | protocol v2 send + receive to SD |
+| LocalSend | `localsend/` | protocol v2 send + receive; ArduinoJson + HTTP |
 | Download | `downloader/` | any HTTP(S) URL → SD |
 | Elements | `periodic/` | NeoCalculator `ChemDatabase.h` |
 | OutRun | `arcade3d/` | host + TFT shim; engine submodule |

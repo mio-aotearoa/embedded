@@ -23,7 +23,7 @@ integration is `patches/wadamesh/` only (no fork of UI/radio logic).
 | ESP-AI | SD TinyStories via `third_party/esp32-ai` + `LLM_DEQ_ROW` |
 | Browser | TactileBrowser core (Lexbor) + LVGL 8.3 glue + Duktape inline JS |
 | Web | Upstream Reader (`htmlToText`) |
-| LocalSend | Protocol v2 HTTP send + receive on `:53317` |
+| LocalSend | Protocol v2 on `:53317`; ArduinoJson + WiFi/HTTPClient (no ESP32 LS lib) |
 | Download | Same downloader worker, arbitrary URL |
 | Elements | NeoCalculator `ChemDatabase.h` grid |
 | OutRun / Voxel | Submodule engines + AppPage hosts; 1:1 RGB565, no stretch |

@@ -1,0 +1,15 @@
+---
+description: Prefer public/pinned libs; no stub apps; host+patch engines
+alwaysApply: true
+---
+
+# Reuse, not stubs
+
+Follow root `AGENTS.md`.
+
+- Prefer `third_party/` pins, wadamesh `lib_deps` (e.g. ArduinoJson), or known
+  open-source over naive homemade parsers/servers.
+- Apps must be real (no empty launches / fake success).
+- Engines: submodule + patch + thin host — do not vendor into `firmware/`.
+- Share `common/http_download` for HTTP(S)→SD; do not hand-roll JSON.
+- Patches: no pure-format diffs.

@@ -2,14 +2,13 @@
 //
 // LocalSend (protocol v2, HTTP-only) for the T-Deck Plus.
 //
-// Written from the protocol description at https://github.com/localsend/protocol:
-// no upstream client code is used (the official app is Flutter, the other
-// implementations are Rust/Go/Win32), so this file is this repository's own
-// code and there is nothing to vendor.
+// Protocol: https://github.com/localsend/protocol (v2, HTTP-only). No ESP32
+// LocalSend library exists; Flutter/Rust/TS ports are not linkable here. JSON
+// uses ArduinoJson (already in the wadamesh env); transfer is WiFiClient +
+// HTTPClient — same stack as the rest of the firmware.
 //
-// Scope: discover peers; send one SD file to one peer; receive one file onto
-// the card while the LocalSend page is open (HTTP server on :53317). TLS/HTTPS
-// peers, folders and multi-file batches are out of scope.
+// Scope: discover peers; send one SD file; receive one file to SD while the
+// page is open (:53317). TLS peers, folders and multi-file batches are out.
 #pragma once
 
 #include <stdint.h>

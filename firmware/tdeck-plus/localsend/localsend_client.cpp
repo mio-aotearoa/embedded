@@ -1,17 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // LocalSend protocol v2 over plain HTTP. See localsend_client.h for scope.
-//
-// Requests are built and parsed by hand on purpose: the protocol needs a few
-// small JSON documents, and doing it here keeps the app free of a JSON library
-// the rest of this firmware does not otherwise use for uploads.
 #include "localsend_client.h"
 
 #include <Arduino.h>
+#include <ArduinoJson.h>
 #include <HTTPClient.h>
 #include <SD.h>
 #include <WiFi.h>
 #include <WiFiUdp.h>
+#include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
@@ -53,27 +51,70 @@ struct RecvSession
 };
 RecvSession s_session = {};
 
-void jsonEscape(const char *in, char *out, size_t cap)
+// Prefer PSRAM for JsonDocument (same pattern as wadamesh MyMesh backup import).
+struct LsJsonAlloc : ArduinoJson::Allocator
 {
-    size_t o = 0;
-    for (size_t i = 0; in[i] && o + 7 < cap; i++)
+    void *allocate(size_t n) override
     {
-        const unsigned char c = (unsigned char)in[i];
-        if (c == '"' || c == '\\')
-        {
-            out[o++] = '\\';
-            out[o++] = (char)c;
-        }
-        else if (c < 0x20)
-        {
-            o += (size_t)snprintf(out + o, cap - o, "\\u%04x", c);
-        }
-        else
-        {
-            out[o++] = (char)c;
-        }
+        void *p = heap_caps_malloc(n, MALLOC_CAP_SPIRAM);
+        return p ? p : malloc(n);
     }
-    out[o] = 0;
+    void deallocate(void *p) override { heap_caps_free(p); }
+    void *reallocate(void *p, size_t n) override
+    {
+        void *q = heap_caps_realloc(p, n, MALLOC_CAP_SPIRAM);
+        return q ? q : realloc(p, n);
+    }
+};
+
+LsJsonAlloc &lsJsonAlloc()
+{
+    static LsJsonAlloc alloc;
+    return alloc;
+}
+
+bool parseJson(const char *json, JsonDocument &doc)
+{
+    if (!json || !json[0]) return false;
+    return deserializeJson(doc, json) == DeserializationError::Ok;
+}
+
+const char *httpBody(const char *resp)
+{
+    if (!resp) return "";
+    const char *p = strstr(resp, "\r\n\r\n");
+    return p ? p + 4 : resp;
+}
+
+const char *fingerprint()
+{
+    static char fp[33];
+    if (fp[0]) return fp;
+    uint8_t mac[6] = {0};
+    WiFi.macAddress(mac);
+    snprintf(fp, sizeof fp, "tdeck-%02x%02x%02x%02x%02x%02x",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    return fp;
+}
+
+void fillDeviceInfo(JsonObject obj, bool withPort, bool announce)
+{
+    obj["alias"] = "T-Deck";
+    obj["version"] = "2.0";
+    obj["deviceModel"] = "T-Deck Plus";
+    obj["deviceType"] = "mobile";
+    obj["fingerprint"] = fingerprint();
+    obj["protocol"] = "http";
+    obj["download"] = false;
+    if (withPort) obj["port"] = kPort;
+    if (announce) obj["announce"] = true;
+}
+
+bool fillInfoJson(char *out, size_t cap, bool withPort)
+{
+    JsonDocument doc(&lsJsonAlloc());
+    fillDeviceInfo(doc.to<JsonObject>(), withPort, false);
+    return serializeJson(doc, out, cap) > 0;
 }
 
 void urlEncode(const char *in, char *out, size_t cap)
@@ -124,73 +165,6 @@ bool urlDecodeInPlace(char *s)
     return true;
 }
 
-// Pull a string field out of a flat JSON object. Good enough for the protocol's
-// documented shape; returns false when the key is absent.
-bool jsonString(const char *json, const char *key, char *out, size_t cap)
-{
-    char needle[40];
-    snprintf(needle, sizeof needle, "\"%s\"", key);
-    const char *p = strstr(json, needle);
-    if (!p) return false;
-    p += strlen(needle);
-    while (*p == ' ' || *p == ':') p++;
-    if (*p != '"') return false;
-    p++;
-    size_t o = 0;
-    while (*p && *p != '"' && o + 1 < cap)
-    {
-        if (*p == '\\' && p[1]) p++;
-        out[o++] = *p++;
-    }
-    out[o] = 0;
-    return true;
-}
-
-bool jsonUint(const char *json, const char *key, uint32_t *out)
-{
-    char needle[40];
-    snprintf(needle, sizeof needle, "\"%s\"", key);
-    const char *p = strstr(json, needle);
-    if (!p) return false;
-    p += strlen(needle);
-    while (*p == ' ' || *p == ':') p++;
-    char *end = nullptr;
-    const unsigned long v = strtoul(p, &end, 10);
-    if (end == p) return false;
-    *out = (uint32_t)v;
-    return true;
-}
-
-const char *fingerprint()
-{
-    static char fp[33];
-    if (fp[0]) return fp;
-    uint8_t mac[6] = {0};
-    WiFi.macAddress(mac);
-    snprintf(fp, sizeof fp, "tdeck-%02x%02x%02x%02x%02x%02x",
-             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-    return fp;
-}
-
-void fillInfoJson(char *out, size_t cap, bool withPort)
-{
-    if (withPort)
-    {
-        snprintf(out, cap,
-                 "{\"alias\":\"T-Deck\",\"version\":\"2.0\",\"deviceModel\":\"T-Deck Plus\","
-                 "\"deviceType\":\"mobile\",\"fingerprint\":\"%s\",\"port\":%u,"
-                 "\"protocol\":\"http\",\"download\":false}",
-                 fingerprint(), (unsigned)kPort);
-    }
-    else
-    {
-        snprintf(out, cap,
-                 "{\"alias\":\"T-Deck\",\"version\":\"2.0\",\"deviceModel\":\"T-Deck Plus\","
-                 "\"deviceType\":\"mobile\",\"fingerprint\":\"%s\",\"download\":false}",
-                 fingerprint());
-    }
-}
-
 void addPeer(const IPAddress &ip, const char *alias, uint16_t port)
 {
     if (!alias || !alias[0]) return;
@@ -216,13 +190,16 @@ void announceMulticast(void)
     WiFiUDP udp;
     if (!udp.begin(0)) return;
     char body[384];
-    snprintf(body, sizeof body,
-             "{\"alias\":\"T-Deck\",\"version\":\"2.0\",\"deviceModel\":\"T-Deck Plus\","
-             "\"deviceType\":\"mobile\",\"fingerprint\":\"%s\",\"port\":%u,"
-             "\"protocol\":\"http\",\"download\":false,\"announce\":true}",
-             fingerprint(), (unsigned)kPort);
+    JsonDocument doc(&lsJsonAlloc());
+    fillDeviceInfo(doc.to<JsonObject>(), true, true);
+    const size_t n = serializeJson(doc, body, sizeof body);
+    if (n == 0)
+    {
+        udp.stop();
+        return;
+    }
     udp.beginPacket(IPAddress(224, 0, 0, 167), kPort);
-    udp.write((const uint8_t *)body, strlen(body));
+    udp.write((const uint8_t *)body, n);
     udp.endPacket();
     udp.stop();
 }
@@ -385,45 +362,31 @@ void handlePrepareUpload(WiFiClient &c, const char *body, const IPAddress &remot
         return;
     }
 
-    const char *files = strstr(body, "\"files\"");
-    if (!files)
+    JsonDocument req(&lsJsonAlloc());
+    if (!parseJson(body, req))
+    {
+        httpRespond(c, 400, "text/plain", "bad json");
+        return;
+    }
+    JsonObject files = req["files"].as<JsonObject>();
+    if (files.isNull() || files.size() == 0)
     {
         httpRespond(c, 400, "text/plain", "no files");
         return;
     }
 
-    // First file object after "files": { "id": { ... } }
-    const char *brace = strchr(files, '{');
-    if (!brace)
-    {
-        httpRespond(c, 400, "text/plain", "bad files");
-        return;
-    }
-    const char *idQuote = strchr(brace + 1, '"');
-    if (!idQuote)
-    {
-        httpRespond(c, 400, "text/plain", "no file id");
-        return;
-    }
-    idQuote++;
-    char fileId[24];
-    size_t i = 0;
-    while (*idQuote && *idQuote != '"' && i + 1 < sizeof fileId) fileId[i++] = *idQuote++;
-    fileId[i] = 0;
-
-    const char *obj = strchr(idQuote, '{');
-    if (!obj)
-    {
-        httpRespond(c, 400, "text/plain", "no file meta");
-        return;
-    }
-
-    char fileName[96];
+    const char *fileId = nullptr;
+    const char *fileName = nullptr;
     uint32_t size = 0;
-    fileName[0] = 0;
-    jsonString(obj, "fileName", fileName, sizeof fileName);
-    jsonUint(obj, "size", &size);
-    if (!fileName[0] || size == 0)
+    for (JsonPair kv : files)
+    {
+        fileId = kv.key().c_str();
+        JsonObject meta = kv.value().as<JsonObject>();
+        fileName = meta["fileName"] | "";
+        size = meta["size"] | 0u;
+        break;  // one file per transfer
+    }
+    if (!fileId || !fileId[0] || !fileName || !fileName[0] || size == 0)
     {
         httpRespond(c, 400, "text/plain", "missing name/size");
         return;
@@ -451,13 +414,16 @@ void handlePrepareUpload(WiFiClient &c, const char *body, const IPAddress &remot
     snprintf(s_recv.fileName, sizeof s_recv.fileName, "%s", s_session.fileName);
     s_recv.err[0] = 0;
 
-    char escapedId[48];
-    char escapedTok[80];
-    jsonEscape(fileId, escapedId, sizeof escapedId);
-    jsonEscape(token, escapedTok, sizeof escapedTok);
+    JsonDocument respDoc(&lsJsonAlloc());
+    respDoc["sessionId"] = sessionId;
+    respDoc["files"][s_session.fileId] = token;
     char resp[256];
-    snprintf(resp, sizeof resp, "{\"sessionId\":\"%s\",\"files\":{\"%s\":\"%s\"}}",
-             sessionId, escapedId, escapedTok);
+    if (serializeJson(respDoc, resp, sizeof resp) == 0)
+    {
+        clearSession();
+        httpRespond(c, 500, "text/plain", "json");
+        return;
+    }
     httpRespond(c, 200, "application/json", resp);
 }
 
@@ -604,8 +570,10 @@ void handleClient(WiFiClient &c)
         (strcmp(pathOnly, "/api/localsend/v2/info") == 0 || strcmp(pathOnly, "/api/localsend/v1/info") == 0))
     {
         char body[320];
-        fillInfoJson(body, sizeof body, false);
-        httpRespond(c, 200, "application/json", body);
+        if (fillInfoJson(body, sizeof body, false))
+            httpRespond(c, 200, "application/json", body);
+        else
+            httpRespond(c, 500, "text/plain", "json");
     }
     else if (strcmp(method, "POST") == 0 && strcmp(pathOnly, "/api/localsend/v2/register") == 0)
     {
@@ -614,12 +582,17 @@ void handleClient(WiFiClient &c)
             readBody(c, contentLength, body, sizeof body);
         else
             body[0] = 0;
-        char alias[33];
-        if (jsonString(body, "alias", alias, sizeof alias) && alias[0])
-            addPeer(remote, alias, kPort);
+        JsonDocument reg(&lsJsonAlloc());
+        if (parseJson(body, reg))
+        {
+            const char *alias = reg["alias"] | "";
+            if (alias[0]) addPeer(remote, alias, kPort);
+        }
         char resp[320];
-        fillInfoJson(resp, sizeof resp, false);
-        httpRespond(c, 200, "application/json", resp);
+        if (fillInfoJson(resp, sizeof resp, false))
+            httpRespond(c, 200, "application/json", resp);
+        else
+            httpRespond(c, 500, "text/plain", "json");
     }
     else if (strcmp(method, "POST") == 0 &&
              strcmp(pathOnly, "/api/localsend/v2/prepare-upload") == 0)
@@ -782,9 +755,12 @@ void discover(void *arg)
                 if (n > 0)
                 {
                     buf[n] = 0;
-                    char alias[33] = {0};
-                    jsonString(buf, "alias", alias, sizeof alias);
-                    if (alias[0]) addPeer(udp.remoteIP(), alias, (uint16_t)kPort);
+                    JsonDocument doc(&lsJsonAlloc());
+                    if (parseJson(buf, doc))
+                    {
+                        const char *alias = doc["alias"] | "";
+                        if (alias[0]) addPeer(udp.remoteIP(), alias, (uint16_t)kPort);
+                    }
                 }
             }
             vTaskDelay(pdMS_TO_TICKS(20));
@@ -811,11 +787,13 @@ void discover(void *arg)
             if (code == 200)
             {
                 const String body = http.getString();
-                char alias[33];
-                char protocol[8] = "http";
-                jsonString(body.c_str(), "alias", alias, sizeof alias);
-                jsonString(body.c_str(), "protocol", protocol, sizeof protocol);
-                if (strcmp(protocol, "http") == 0) addPeer(ip, alias, kPort);
+                JsonDocument doc(&lsJsonAlloc());
+                if (parseJson(body.c_str(), doc))
+                {
+                    const char *alias = doc["alias"] | "";
+                    const char *protocol = doc["protocol"] | "http";
+                    if (alias[0] && strcmp(protocol, "http") == 0) addPeer(ip, alias, kPort);
+                }
             }
             http.end();
             vTaskDelay(1);
@@ -864,17 +842,29 @@ void sendTask(void *arg)
 
     const char *base = strrchr(job->path, '/');
     base = base ? base + 1 : job->path;
-    char escaped[96];
-    jsonEscape(base, escaped, sizeof escaped);
 
-    char body[512];
-    const int bodyLen = snprintf(
-        body, sizeof body,
-        "{\"info\":{\"alias\":\"T-Deck\",\"version\":\"2.0\",\"deviceModel\":\"T-Deck Plus\","
-        "\"deviceType\":\"mobile\",\"fingerprint\":\"%s\",\"port\":%u,\"protocol\":\"http\","
-        "\"download\":false},\"files\":{\"1\":{\"id\":\"1\",\"fileName\":\"%s\",\"size\":%u,"
-        "\"fileType\":\"application/octet-stream\"}}}",
-        fingerprint(), (unsigned)kPort, escaped, (unsigned)size);
+    char body[640];
+    size_t bodyLen = 0;
+    {
+        JsonDocument prepDoc(&lsJsonAlloc());
+        fillDeviceInfo(prepDoc["info"].to<JsonObject>(), true, false);
+        JsonObject fileMeta = prepDoc["files"]["1"].to<JsonObject>();
+        fileMeta["id"] = "1";
+        fileMeta["fileName"] = base;
+        fileMeta["size"] = (uint32_t)size;
+        fileMeta["fileType"] = "application/octet-stream";
+        bodyLen = serializeJson(prepDoc, body, sizeof body);
+        if (bodyLen == 0)
+        {
+            snprintf(s_state.err, sizeof s_state.err, "%s", "Cannot build prepare-upload");
+            file.close();
+            s_state.running = false;
+            s_state.done = true;
+            delete job;
+            vTaskDelete(nullptr);
+            return;
+        }
+    }
 
     char resp[768];
     resp[0] = 0;
@@ -893,7 +883,7 @@ void sendTask(void *arg)
     }
 
     const int prep = httpRequest(peerIp, job->peer.port, "/api/localsend/v2/prepare-upload",
-                                 "application/json", body, (size_t)bodyLen, nullptr, 0,
+                                 "application/json", body, bodyLen, nullptr, 0,
                                  resp, sizeof resp);
     if (prep != 200)
     {
@@ -909,9 +899,16 @@ void sendTask(void *arg)
     char sessionId[64];
     char token[64];
     sessionId[0] = token[0] = 0;
-    jsonString(resp, "sessionId", sessionId, sizeof sessionId);
-    const char *files = strstr(resp, "\"files\"");
-    if (files) jsonString(files, "1", token, sizeof token);
+    {
+        JsonDocument ack(&lsJsonAlloc());
+        if (parseJson(httpBody(resp), ack))
+        {
+            const char *sid = ack["sessionId"] | "";
+            const char *tok = ack["files"]["1"] | "";
+            if (sid[0]) snprintf(sessionId, sizeof sessionId, "%s", sid);
+            if (tok[0]) snprintf(token, sizeof token, "%s", tok);
+        }
+    }
 
     if (!sessionId[0] || !token[0])
     {
