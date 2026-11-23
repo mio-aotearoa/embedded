@@ -18,7 +18,7 @@ jobs:
     name: patch series apply cleanly
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
       - name: Apply every series
@@ -37,7 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: patch-series
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
       - uses: cachix/install-nix-action@v27
@@ -57,15 +57,14 @@ jobs:
           ./result/bin/test_browser_js
 
   wadamesh-tests:
-    name: wadamesh host suite (advisory)
+    name: wadamesh host suite (regressions only)
     runs-on: ubuntu-latest
     needs: patch-series
-    # Upstream's own suite, not all of which is platform-clean (several tests
-    # need macOS/Linux-specific fakes). Report the result without blocking on
-    # it; a failure here is still visible on the run.
-    continue-on-error: true
+    # Upstream's own suite has ~24 link-failing tests on both Linux/g++ and
+    # macOS/clang before any patch is applied, so comparing against a clean
+    # baseline is the only honest gate: the series must add no new failure.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
       - uses: cachix/install-nix-action@v27
@@ -75,8 +74,33 @@ jobs:
       # Only the wadamesh series: the E1002 series has its own job.
       - name: Apply the series the suite tests
         run: ./scripts/patches.sh apply wadamesh
-      - name: Run the upstream host tests against the patched tree
-        run: nix develop -c bash -c 'cd third_party/wadamesh && CXX=g++ CC=gcc bash scripts/run-host-tests.sh'
+      - name: Suite on the patched tree
+        run: |
+          set -o pipefail
+          TMPDIR=/tmp/wada-patched nix develop -c bash -c \
+            'cd third_party/wadamesh && CXX=g++ CC=gcc bash scripts/run-host-tests.sh' \
+            | tee /tmp/patched.txt || true
+          grep '^failing:' /tmp/patched.txt | tr ' ' '\n' | grep '^test_' | sort > /tmp/patched-failing.txt || true
+          echo "patched failures: $(wc -l < /tmp/patched-failing.txt)"
+      - name: Suite on the pinned base
+        run: |
+          set -o pipefail
+          git -C third_party/wadamesh checkout -- .
+          TMPDIR=/tmp/wada-base nix develop -c bash -c \
+            'cd third_party/wadamesh && CXX=g++ CC=gcc bash scripts/run-host-tests.sh' \
+            | tee /tmp/base.txt || true
+          grep '^failing:' /tmp/base.txt | tr ' ' '\n' | grep '^test_' | sort > /tmp/base-failing.txt || true
+          echo "baseline failures: $(wc -l < /tmp/base-failing.txt)"
+      - name: Fail only on new failures
+        run: |
+          set -o pipefail
+          comm -13 /tmp/base-failing.txt /tmp/patched-failing.txt > /tmp/new.txt || true
+          if [ -s /tmp/new.txt ]; then
+            echo "::error::the series adds host-test failures:"
+            cat /tmp/new.txt
+            exit 1
+          fi
+          echo "no new failures (baseline $(wc -l < /tmp/base-failing.txt), patched $(wc -l < /tmp/patched-failing.txt))"
 
   firmware:
     name: T-Deck Plus firmware
@@ -84,7 +108,7 @@ jobs:
     needs: patch-series
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
       - uses: cachix/install-nix-action@v27
@@ -98,10 +122,23 @@ jobs:
           path: .platformio
           key: platformio-${{ hashFiles('patches/wadamesh/*.patch', 'third_party/wadamesh/platformio.ini') }}
           restore-keys: platformio-
+      # Separate step so a broken devShell is obvious instead of surfacing as a
+      # mysterious build failure.
+      - name: Toolchain
+        run: nix develop -c bash -c 'echo shell ok; pio --version; g++ --version | head -1'
       - name: Build
-        run: nix develop -c firmware/tdeck-plus/build.sh
+        run: |
+          set -o pipefail
+          nix develop -c bash -x firmware/tdeck-plus/build.sh 2>&1 | tee /tmp/firmware.log
+      - name: Build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-build-log
+          path: /tmp/firmware.log
+          if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         with:
           name: tdeck-firmware
-          path: third_party/out/LilyGo_TDeck_companion_radio_touch.bin
+          path: third_party/out/*.bin
           if-no-files-found: error
