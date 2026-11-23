@@ -1,5 +1,6 @@
---- a/tactilebrowser_core/src/layout_engine.cpp	2026-11-19 16:20:55
-+++ b/tactilebrowser_core/src/layout_engine.cpp	2026-11-19 16:20:55
+diff --git a/tactilebrowser_core/src/layout_engine.cpp b/tactilebrowser_core/src/layout_engine.cpp
+--- a/tactilebrowser_core/src/layout_engine.cpp
++++ b/tactilebrowser_core/src/layout_engine.cpp
 @@ -19,8 +19,8 @@
      .y = 0,
      .is_block = true,

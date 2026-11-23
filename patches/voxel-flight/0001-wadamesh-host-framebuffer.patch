@@ -264,7 +264,7 @@ index c565f16..5ef0aa5 100644
 +int runSelection();
 +void buildTables();
 +void generateWorld();
-+bool voxelHostBegin(void);
++bool voxelHostBegin(int w, int h);
 +void voxelHostEnd(void);
 +bool voxelHostTick(void);
 +
