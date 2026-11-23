@@ -45,6 +45,30 @@ nix develop   # optional: Node/CMake/Ninja/esptool from the flake
 
 The IDF builder applies the three photoframe patches and ESP32Drop's, then
 generates web/splash assets.
+
+### Project-local toolchain
+
+`.toolchains/` is gitignored; nothing is installed system-wide.
+
+```bash
+git clone --depth 1 --shallow-submodules -b v6.0.3 --recursive \
+  https://github.com/espressif/esp-idf.git .toolchains/esp-idf
+export IDF_TOOLS_PATH="$PWD/.toolchains/espressif"
+.toolchains/esp-idf/install.sh esp32s3
+. .toolchains/esp-idf/export.sh        # now idf.py is on PATH
+```
+
+`idf.py` also needs `cmake` and `ninja` on PATH (`nix develop -c` supplies
+them, or prepend `nix build nixpkgs#cmake --print-out-paths`). Asset generation
+wants `npm` plus `qrcode`, `pillow` and `rsvg-convert`:
+
+```bash
+python3 -m venv .toolchains/py
+.toolchains/py/bin/pip install qrcode pillow
+nix shell nixpkgs#librsvg -c bash -c 'cd third_party/esp32-photoframe && \
+  ../../.toolchains/py/bin/python build.py --board seeedstudio_reterminal_e1002 \
+  --step webapp --step splash'
+```
 `--skip-assets` reuses existing assets; `--build-dir PATH` changes the output
 parent. If native splash generation fails, use
 [`scripts/pack_splash.py`](../../scripts/pack_splash.py) with ImageMagick and
