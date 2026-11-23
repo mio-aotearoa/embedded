@@ -116,12 +116,22 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
       # PlatformIO downloads the espressif32 platform and lib_deps on first use;
-      # cache them so only a base bump pays for that again.
+      # cache them so only a base bump pays for that again. build/duktape is a
+      # network fetch too (scripts/duktape.sh), so cache it alongside.
       - uses: actions/cache@v4
         with:
-          path: .platformio
+          path: |
+            .platformio
+            build/duktape
           key: platformio-${{ hashFiles('patches/wadamesh/*.patch', 'third_party/wadamesh/platformio.ini') }}
           restore-keys: platformio-
+      # If the build dies before PlatformIO starts, this says why in one screen.
+      - name: Submodule state
+        run: |
+          git -C third_party/wadamesh rev-parse --short HEAD
+          git -C third_party/wadamesh remote -v | head -2
+          git -C third_party/wadamesh status --short | head -5
+          ls third_party/wadamesh/platformio.ini third_party/wadamesh/scripts/build/pre_gen_baked.py
       # Separate step so a broken devShell is obvious instead of surfacing as a
       # mysterious build failure.
       - name: Toolchain

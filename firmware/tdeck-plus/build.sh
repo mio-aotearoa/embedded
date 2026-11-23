@@ -19,11 +19,13 @@ cd "$ROOT"
 
 [ -f third_party/wadamesh/platformio.ini ] || die "third_party/wadamesh is missing; run: git submodule update --init --recursive"
 remote="$(git -C third_party/wadamesh remote get-url origin 2>/dev/null || true)"
+echo "==> wadamesh remote: ${remote:-<none>}"
 case "$remote" in
     *jade-on-mesh/wadamesh-tak*) ;;
     *) die "third_party/wadamesh must be jade-on-mesh/wadamesh-tak (found: ${remote:-no remote}); run: git submodule sync third_party/wadamesh" ;;
 esac
 
+echo "==> step: apply the app series"
 # wadamesh carries the app hooks; TactileBrowser makes Lexbor's encoding
 # tables const so the browser's HTML/CSS engine fits in flash, not DRAM;
 # esp32-ai adds the LLM_DEQ_ROW hook the ESP-AI app's SD-backed weights need.
@@ -31,6 +33,7 @@ esac
   esp32-ai esp32s3-arcade-3d voxel-flight
 
 # Duktape ships raw sources only: build its amalgamation (build/duktape/).
+echo "==> step: duktape amalgamation"
 ./scripts/duktape.sh
 
 # One core dir for both build paths (script and `nix run .#firmware`), so the
