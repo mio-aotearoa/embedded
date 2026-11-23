@@ -219,6 +219,9 @@
               pkgs.esptool
               pkgs.cmake
               pkgs.ninja
+              # wadamesh's scripts/run-host-tests.sh wants a real g++ (Apple's
+              # /usr/bin/g++ is clang); CI runs that suite in this shell.
+              pkgs.gcc
             ];
             shellHook = ''
               export SSL_CERT_FILE="${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"

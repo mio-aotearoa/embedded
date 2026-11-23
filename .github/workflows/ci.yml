@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  patch-series:
+    name: patch series apply cleanly
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Apply every series
+        run: ./scripts/patches.sh apply
+      - name: No series may conflict
+        run: |
+          set -o pipefail
+          ./scripts/patches.sh status | tee /tmp/series.txt
+          if grep -q 'conflicts' /tmp/series.txt; then
+            echo "::error::a patch series no longer applies to its pinned commit"
+            exit 1
+          fi
+
+  host-tests:
+    name: host tests (hermetic)
+    runs-on: ubuntu-latest
+    needs: patch-series
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - name: Build and run
+        run: |
+          nix build .#host-tests --print-build-logs
+          ./result/bin/test_zim_archive
+          ./result/bin/test_airdrop_companion
+          ./result/bin/test_browser_js
+
+  wadamesh-tests:
+    name: wadamesh host suite (advisory)
+    runs-on: ubuntu-latest
+    needs: patch-series
+    # Upstream's own suite, not all of which is platform-clean (several tests
+    # need macOS/Linux-specific fakes). Report the result without blocking on
+    # it; a failure here is still visible on the run.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - name: Apply the series the suite tests
+        run: ./scripts/patches.sh apply
+      - name: Run the upstream host tests against the patched tree
+        run: nix develop -c bash -c 'cd third_party/wadamesh && CXX=g++ CC=gcc bash scripts/run-host-tests.sh'
+
+  firmware:
+    name: T-Deck Plus firmware
+    runs-on: ubuntu-latest
+    needs: patch-series
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      # PlatformIO downloads the espressif32 platform and lib_deps on first use;
+      # cache them so only a base bump pays for that again.
+      - uses: actions/cache@v4
+        with:
+          path: .platformio
+          key: platformio-${{ hashFiles('patches/wadamesh/*.patch', 'third_party/wadamesh/platformio.ini') }}
+          restore-keys: platformio-
+      - name: Build
+        run: nix develop -c firmware/tdeck-plus/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tdeck-firmware
+          path: third_party/out/LilyGo_TDeck_companion_radio_touch.bin
+          if-no-files-found: error

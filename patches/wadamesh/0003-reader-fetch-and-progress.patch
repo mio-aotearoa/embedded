@@ -1,0 +1,136 @@
+diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
+--- a/src/ui-touch/UITask.cpp
++++ b/src/ui-touch/UITask.cpp
+@@ -34255,6 +34373,7 @@ static const char    kReaderHomeUrl[] = "sd:/home.htm";
+ static const char    kReaderChangelogUrl[] = "http://wadamesh.com/changelog.html";
+ static lv_obj_t*     s_reader_root   = nullptr;
+ static lv_obj_t*     s_reader_url_ta = nullptr;
++
+ static lv_obj_t*     s_reader_go     = nullptr;
+ static lv_obj_t*     s_reader_editbtn= nullptr;    // floating "edit URL" button (shown while reading)
+ static lv_obj_t*     s_reader_scroll = nullptr;    // flex-column body container (holds text + link labels)
+@@ -34273,7 +34392,7 @@ static auto&         s_reader_pending_url = psramStatic<char[300]>();
+ static char          s_reader_msg[110] = "";       // status text (worker writes, UI shows)
+ static TaskHandle_t  s_reader_task    = nullptr;
+ static bool          s_reader_pristine = false;    // URL field still holds the untouched default
+-static const size_t  kReaderRawCap  = 192 * 1024;  // max raw HTML we buffer (PSRAM)
++static const size_t  kReaderRawCap  = 512 * 1024;  // max raw HTML we buffer (PSRAM); matches kReaderHtmlCap
+ static const size_t  kReaderTextCap =  60 * 1024;  // max extracted text we keep
+ // Links found on the page: byte range in s_reader_text + resolved absolute href.
+ using ReaderLink = ReaderContent::Link;
+@@ -34440,20 +34559,61 @@ static void readerFetchBody() {
+   if (!raw) { rawcap = 24 * 1024; raw = (uint8_t*)heap_caps_malloc(rawcap, MALLOC_CAP_SPIRAM); }
+   int code = -1; size_t total = 0; bool source_ok = false;
+   ReaderLocalResult local_result = ReaderLocalResult::NoStorage;
++  auto progress = [&](const char* msg) {
++    if (generation != s_reader_generation || !msg) return;
++    snprintf(s_reader_msg, sizeof s_reader_msg, "%s", msg);
++    s_reader_dirty = true;
++  };
+   if (raw) {
+     if (local) {
++      progress("Reading SD\xe2\x80\xa6");
+       local_result = readerReadLocal(url, raw, rawcap - 1, &total, generation,
+                                      text_mode ? &txt_size : nullptr, text_mode ? &txt_at : nullptr);
+       source_ok = local_result == ReaderLocalResult::Ok;
+     } else {
++      // Follow redirects here rather than inside HTTPClient: it cannot re-connect
++      // a caller-supplied WiFiClientSecure across hosts, and sites that redirect
++      // (duckduckgo.com, Hugging Face, the Kiwix mirror) then failed as "HTTP -1".
+       HTTPClient httpc;
+-      httpc.setReuse(false); httpc.setConnectTimeout(9000); httpc.setTimeout(15000);
+-      httpc.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS); httpc.setUserAgent("wadamesh-reader");
+-      WiFiClientSecure scli; WiFiClient pcli; bool began;
+-      if (https) { scli.setInsecure(); began = httpc.begin(scli, url); }
+-      else       {                       began = httpc.begin(pcli, url); }
+-      if (began) { httpc.addHeader("Accept-Encoding", "identity"); code = httpc.GET(); }
++      WiFiClientSecure scli; WiFiClient pcli;
++      for (int hop = 0; hop <= 4; ++hop) {
++        const bool tls = readerCiPrefix(url, strlen(url), "https://");
++        if (hop == 0) progress(tls ? "TLS connect\xe2\x80\xa6" : "Connecting\xe2\x80\xa6");
++        else {
++          char hopmsg[48];
++          snprintf(hopmsg, sizeof hopmsg, "Redirect %d\xe2\x80\xa6", hop);
++          progress(hopmsg);
++        }
++        httpc.setReuse(false); httpc.setConnectTimeout(9000); httpc.setTimeout(15000);
++        httpc.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
++        httpc.setUserAgent("Mozilla/5.0 (compatible; wadamesh-reader)");
++        bool began;
++        if (tls) { scli.setInsecure(); began = httpc.begin(scli, url); }
++        else     {                     began = httpc.begin(pcli, url); }
++        if (!began) { httpc.end(); break; }
++        httpc.addHeader("Accept-Encoding", "identity");
++        progress(tls ? "HTTPS GET\xe2\x80\xa6" : "HTTP GET\xe2\x80\xa6");
++        code = httpc.GET();
++        if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
++          String loc = httpc.header("Location");
++          httpc.end();
++          if (!loc.length() || hop == 4) { code = -1; break; }
++          if (loc.startsWith("http")) {
++            snprintf(url, sizeof url, "%s", loc.c_str());
++          } else {
++            const char* scheme = strstr(url, "://");
++            const char* slash = scheme ? strchr(scheme + 3, '/') : nullptr;
++            const size_t base_len = slash ? (size_t)(slash - url) : strlen(url);
++            char next[300];
++            snprintf(next, sizeof next, "%.*s%s", (int)base_len, url, loc.c_str());
++            snprintf(url, sizeof url, "%s", next);
++          }
++          continue;
++        }
++        break;
++      }
+       if (code == HTTP_CODE_OK) {
++        progress("Downloading\xe2\x80\xa6");
+         ReaderBufferStream sink(raw, rawcap - 1, generation);
+         const int transfer_result = httpc.writeToStream(&sink);
+         total = sink.size();
+@@ -34462,6 +34622,7 @@ static void readerFetchBody() {
+       httpc.end();
+     }
+   }
++  if (source_ok) progress("Parsing page\xe2\x80\xa6");
+   if (!raw) snprintf(result_msg, sizeof result_msg, "Out of memory");
+   else if (source_ok && total >= 2 && raw[0] == 0x1f && (uint8_t)raw[1] == 0x8b)
+     snprintf(result_msg, sizeof result_msg, "Page is gzip-compressed \xe2\x80\x94 not supported yet");
+@@ -34658,7 +34819,26 @@ static void readerShowMessage(const char* msg, uint32_t color) {
+   lv_obj_set_style_text_color(l, lv_color_hex(color), LV_PART_MAIN);
+   lv_label_set_text(l, msg);
+ }
+-static void readerShowLoading() { readerShowMessage(LV_SYMBOL_REFRESH "  Loading\xe2\x80\xa6", 0x6FB7FF); }
++static void readerShowLoading() {
++  // Prefer the live fetch stage (Connecting / redirect / Downloading NNk / …)
++  // over a generic spinner label so the body matches the status bar.
++  char line[128];
++  if (s_reader_msg[0])
++    snprintf(line, sizeof line, LV_SYMBOL_REFRESH "  %s", s_reader_msg);
++  else
++    snprintf(line, sizeof line, LV_SYMBOL_REFRESH "  Loading\xe2\x80\xa6");
++  readerShowMessage(line, 0x6FB7FF);
++}
++#if defined(WADAMESH_BROWSER)
++// Fonts for the separate Browser app (Lexbor layout). Kept here so it can use
++// the same CJK-capable faces as the rest of the UI; the Web/Reader tile stays
++// on the upstream text extraction path.
++const lv_font_t* readerWebFont(int px, bool bold) {
++  if (px >= 16) return bold ? &g_font_semi_16 : &g_font_16;
++  if (px >= 14) return bold ? &g_font_semi_14 : &g_font_14;
++  return bold ? &g_font_semi_12 : &g_font_12;
++}
++#endif
+ // Rebuild the body: flowing text split into paragraph labels + tappable link labels.
+ static void readerRenderBody() {
+   if (!s_reader_scroll) return;
+@@ -75844,7 +76205,10 @@ static void refreshStatusLabels() {
+       readerStart(pending_url);
+     } else {
+       if (s_reader_status) lv_label_set_text(s_reader_status, s_reader_msg);
+-      if (!s_reader_busy) {                 // the fetch finished
++      if (s_reader_busy) {
++        // Keep the body in sync with Connecting / Downloading / redirect stages.
++        readerShowLoading();
++      } else if (!s_reader_busy) {          // the fetch finished
+         if (s_reader_ok) {                  // …with a page
+           readerRenderBody();
+           readerSetAddrExpanded(false);     // collapse the address bar -> fullscreen reading

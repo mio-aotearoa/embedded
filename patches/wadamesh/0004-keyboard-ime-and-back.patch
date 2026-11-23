@@ -1,0 +1,164 @@
+diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
+--- a/src/ui-touch/UITask.cpp
++++ b/src/ui-touch/UITask.cpp
+@@ -62048,6 +62260,32 @@ if (g_lv.task && g_lv.task->isManualLock()) {
+     if (g_lv.keyboard) lv_keyboard_set_textarea(g_lv.keyboard, nullptr);
+     ta_focused = nullptr;
+   }
++  // An app page bound its own field: the keyboard belongs to it — Enter submits,
++  // Backspace edits, Space types a space (not the screen lock), and nothing here
++  // is allowed to navigate the UI sitting behind the page.
++  if (s_page_text_field) {
++    if (!lv_obj_is_valid(s_page_text_field)) {
++      s_page_text_field = nullptr;
++    } else if (ta_focused == s_page_text_field) {
++      if (imeHandleKey(s_page_text_field, key)) {
++        // Space / Enter / digits consumed by JA/ZH IME (candidates or convert)
++      } else if (key == 0x0D || key == 0x0A) {
++        lv_event_send(s_page_text_field, LV_EVENT_READY, nullptr);
++      } else if (key == 0x08 || key == 0x7F) {
++        lv_textarea_del_char(s_page_text_field);
++      } else if (key == 27) {
++        lv_event_send(s_page_text_field, LV_EVENT_CANCEL, nullptr);
++      } else if (key == LV_KEY_LEFT) {
++        lv_textarea_cursor_left(s_page_text_field);
++      } else if (key == LV_KEY_RIGHT) {
++        lv_textarea_cursor_right(s_page_text_field);
++      } else if (key >= 0x20 && key < 0x7F) {
++        lv_textarea_add_char(s_page_text_field, (uint32_t)key);
++      }
++      if (g_lv.task) g_lv.task->noteUserInput();
++      return;
++    }
++  }
+ #if CAP_KEYPAD_NAV && !defined(TLORA_PAGER)
+   // Edit mode (keyboard-nav ON only): a focused field becomes the typing target after
+   // select/Enter (below) — until then `ta` is null so the nav keys navigate. With
+@@ -62388,6 +62626,11 @@ if (g_lv.task && g_lv.task->isManualLock()) {
+     }
+     accentBoxHide();
+   } else if (key == ' ') {
++    // CJK IME: Space converts / cycles candidates when JA or ZH is active.
++    if (imeHandleKey(ta, key)) {
++      if (g_lv.task) g_lv.task->noteUserInput();
++      return;
++    }
+     // Double-tap SPACE within kDoubleSpaceMs toggles between English and
+     // the configured secondary keyboard. If no secondary is set, it behaves
+     // as a normal space. The limit is 250 ms, except on the M9: its same-key
+@@ -62416,6 +62659,10 @@ if (g_lv.task && g_lv.task->isManualLock()) {
+       lv_textarea_add_char(ta, ' ');
+     }
+   } else if (key == 0x0D) {                   // regular ENTER (CR)
++    if (imeHandleKey(ta, key)) {
++      if (g_lv.task) g_lv.task->noteUserInput();
++      return;
++    }
+     // Enter is a non-typing action (send / newline / submit) — always tear down the
+     // accent + @-mention popups. The Enter-to-send path keeps the keyboard up "for the
+     // next message", so without this the accent box for the last letter lingers over
+@@ -62499,6 +62746,11 @@ if (g_lv.task && g_lv.task->isManualLock()) {
+     composerMentionRefresh(ta);
+ #endif
+   } else if (key >= 0x20 && key < 0x7F) {      // printable ASCII
++    // Digits / Esc while the CJK candidate bar is up.
++    if (imeHandleKey(ta, key)) {
++      if (g_lv.task) g_lv.task->noteUserInput();
++      return;
++    }
+     bool shifted = (key >= 'A' && key <= 'Z');
+     const char* mapped = keyboardLayoutMapHwKey(keyboardLayoutsGetCurrent(), key, shifted);
+     if (mapped) {
+@@ -68237,29 +68563,59 @@ static void statusBarTapCb(lv_event_t* e) {
+   if (s_cc_root) closeControlCenter(); else openControlCenter();
+ }
+ 
+-// Reader/Web page back: fire on PRESSED (touch-DOWN), not CLICKED. The V4 cap-touch
+-// swipe detector calls lv_indev_wait_release mid-tap and drops the bar's CLICKED (the
+-// same reason the chat back uses PRESSED) — that's why the reader's "‹" tap "did
+-// nothing". This closes the reader on touch-down whenever it's the open page.
++// Reader/Web page back. Closing on PRESSED (touch-DOWN) was the fix for the V4
++// cap-touch swipe detector: it calls lv_indev_wait_release mid-tap and drops the
++// bar's CLICKED, so the reader's "‹" tap "did nothing". But touch-down is also a
++// trap while reading: a finger that lands on the bar and then drags — the first
++// few pixels of a scroll that starts a touch too high — left the page before the
++// drag had moved at all, so scrolling a long page could quit the reader. Wait for
++// the release instead and only take it as a tap: movement beyond kSbTapSlop px,
++// or a press long enough to be the screenshot hold, is not back. RELEASED is as
++// reliable as PRESSED (wait_release skips CLICKED, not RELEASED), so the
++// cap-touch trap stays closed.
++static constexpr lv_coord_t kSbTapSlop = 12;   // px of finger travel that make it a drag
++static lv_coord_t s_sb_tap_x = 0, s_sb_tap_y = 0;
++static uint32_t   s_sb_tap_start_ms = 0;
++static bool       s_sb_tap_armed = false;
+ static void statusBarReaderBackCb(lv_event_t* e) {
+-  if (lv_event_get_code(e) != LV_EVENT_PRESSED) return;
++  const lv_event_code_t code = lv_event_get_code(e);
++  lv_indev_t* in = lv_indev_get_act();
++  lv_point_t pt = {0, 0};
++  if (in) lv_indev_get_point(in, &pt);
++  if (code == LV_EVENT_PRESSED) {
++    s_sb_tap_armed    = (s_apppage_close != nullptr);
++    s_sb_tap_x        = pt.x;
++    s_sb_tap_y        = pt.y;
++    s_sb_tap_start_ms = millis();
++  } else if (code == LV_EVENT_PRESSING) {
++    const lv_coord_t dx = pt.x - s_sb_tap_x, dy = pt.y - s_sb_tap_y;
++    if (dx > kSbTapSlop || dx < -kSbTapSlop || dy > kSbTapSlop || dy < -kSbTapSlop)
++      s_sb_tap_armed = false;   // it's a drag/scroll, not a tap on the bar
++    return;
++  } else if (code == LV_EVENT_PRESS_LOST) {
++    s_sb_tap_armed = false;
++    return;
++  } else if (code != LV_EVENT_RELEASED) {
++    return;
++  }
+   // Every full-screen tool page (Reader, Monitor, Spectrum, Discover, VNC, Remote, Advert, …) is
+-  // exited only by the bar's CLICKED -> s_apppage_close. On cap-touch the swipe detector's
+-  // click-abort (lvglTouchRead) can drop that lone CLICKED, trapping the user on a touch-only board
+-  // (the P4). Close on PRESSED too — the proven Reader fallback, now generalised to every app page.
+-  //
+-  // The CLICKED that follows this same tap must be SWALLOWED. Clearing s_apppage_close does not
+-  // make it harmless (the original claim here): statusBarTapCb only skips its app-page branch and
+-  // then falls through every other branch to the control-center toggle at its end — so exiting any
+-  // app page by the "‹" also popped the dropdown open. Harmless while this was Reader-only, wrong
+-  // for every app page since beta_49.
+-  if (s_apppage_close) { s_apppage_close(); s_sb_back_ms = millis() | 1u; return; }   // |1: 0 means "none"
++  // exited by a tap on the bar, delivered above as a press-and-release. The CLICKED that follows
++  // must be SWALLOWED: clearing s_apppage_close does not make it harmless, because statusBarTapCb
++  // only skips its app-page branch and then falls through every other branch to the
++  // control-center toggle at its end — so exiting an app page would also pop the dropdown open.
++  if (code == LV_EVENT_RELEASED) {
++    const bool tap = s_sb_tap_armed &&
++                     (uint32_t)(millis() - s_sb_tap_start_ms) < 1200;   // ≥ that is the screenshot hold
++    s_sb_tap_armed = false;
++    if (!tap) return;
++    if (s_apppage_close) { s_apppage_close(); s_sb_back_ms = millis() | 1u; return; }   // |1: 0 means "none"
++    return;
++  }
+   // A settings page's "‹ Title" on the two-row bar's second row (#833): the same
+-  // touch-down back, as the CLICKED alone did not take it there.
++  // touch-down back, as the CLICKED alone did not take it there. (Still on PRESSED:
++  // a settings sheet is not full-screen, and its lower row is the only target there.)
++  if (s_apppage_close) return;   // an app page's back is the tap released above
+   if (s_settings_sheet && s_statusbar_tall && sbTwoRow()) {
+-    lv_indev_t* in = lv_indev_get_act();
+-    lv_point_t pt = {0, 0};
+-    if (in) lv_indev_get_point(in, &pt);
+     lv_area_t ba;
+     lv_obj_get_coords(g_statusbar.root, &ba);
+     if (pt.y < ba.y1 + STATUSBAR_H) return;   // the top row keeps the bar's usual tap
+@@ -68627,7 +68983,12 @@ static void buildGlobalStatusBar() {
+   // keypad users open the control center via the dedicated key.)
+   lv_obj_add_flag(g_statusbar.root, NAV_SKIP_FLAG);
+   lv_obj_add_event_cb(g_statusbar.root, statusBarTapCb, LV_EVENT_CLICKED, nullptr);
+-  lv_obj_add_event_cb(g_statusbar.root, statusBarReaderBackCb, LV_EVENT_PRESSED, nullptr);  // reader "‹": PRESSED so cap-touch can't drop it
++  // reader/tool-page "‹": a tap (press + release with little travel), not a touch-down,
++  // so a scroll that starts on the bar can't quit the page.
++  lv_obj_add_event_cb(g_statusbar.root, statusBarReaderBackCb, LV_EVENT_PRESSED,    nullptr);
++  lv_obj_add_event_cb(g_statusbar.root, statusBarReaderBackCb, LV_EVENT_PRESSING,   nullptr);
++  lv_obj_add_event_cb(g_statusbar.root, statusBarReaderBackCb, LV_EVENT_RELEASED,   nullptr);
++  lv_obj_add_event_cb(g_statusbar.root, statusBarReaderBackCb, LV_EVENT_PRESS_LOST, nullptr);
+   // Hold the bar for 3 s to drop a screenshot to the SD card.
+   lv_obj_add_event_cb(g_statusbar.root, statusBarHoldCb, LV_EVENT_PRESSED,    nullptr);
+   lv_obj_add_event_cb(g_statusbar.root, statusBarHoldCb, LV_EVENT_PRESSING,   nullptr);

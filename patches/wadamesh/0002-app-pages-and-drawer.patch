@@ -1,0 +1,294 @@
+diff --git a/src/ui-touch/AppPage.h b/src/ui-touch/AppPage.h
+--- a/src/ui-touch/AppPage.h
++++ b/src/ui-touch/AppPage.h
+@@ -36,6 +36,24 @@ lv_coord_t appPageContentTop();
+ /** Usable content height below the status bar. */
+ lv_coord_t appPageContentH();
+ 
++/**
++ * Height of the tall bar that overlaps the top of a page root — the amount page
++ * content must be pushed down. appPageCreateRoot() starts one row below the
++ * default bar and appPageBegin() then doubles it, so its second row covers the
++ * top of the page (RepeaterAdminApp compensated by hand before this existed).
++ * 0 for pages that use appPageBeginSlim().
++ */
++lv_coord_t appPageBarCover();
++
++/**
++ * Make `ta` the target of the PHYSICAL keyboard for as long as the page is up
++ * (pass nullptr to release it). The on-screen keyboard never appears: on boards
++ * with real keys — the T-Deck included — wadamesh keeps that widget hidden and
++ * only uses it as the binding handleHwKey() types into. Without this a page's
++ * text field cannot receive hardware keystrokes at all.
++ */
++void appPageBindTextField(lv_obj_t* ta);
++
+ /**
+  * Create a page root: full width, from just under the status bar to the bottom of the
+  * screen, on lv_layer_top, opaque `bg_color`, non-scrollable and CLICKABLE so no press
+diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
+--- a/src/ui-touch/UITask.cpp
++++ b/src/ui-touch/UITask.cpp
+@@ -158,6 +158,30 @@ static void* wadaMp3Scratch() { return s_wada_mp3_scratch; }
+ #include <Utils.h>
+ #include <LvglPsramAlloc.h>   // PSRAM-preferred alloc helpers for the map tile cache
+ #include "SnakeGame.h"        // Apps → Snake (self-contained game module)
++#if WADAMESH_KIWIX
++#include "kiwix_app.h"         // Apps → Kiwix: ZIM archives on the card, articles in the Reader
++#endif
++#if WADAMESH_ESP32AI
++#include "esp32ai_app.h"      // Apps → ESP-AI: model assets on the card, fetched over Wi-Fi
++#endif
++#if WADAMESH_PERIODIC
++#include "periodic_app.h"      // Apps → Periodic Table: 118 elements, LVGL-drawn grid
++#endif
++#if WADAMESH_LOCALSEND
++#include "localsend_app.h"     // Apps → LocalSend: receive onto the card; send to a peer
++#endif
++#if WADAMESH_DOWNLOAD
++#include "download_app.h"      // Apps → Download: any http(s) URL straight to the card
++#endif
++#if WADAMESH_BROWSER
++#include "browser_app.h"       // Apps → Browser: HTML/CSS via the Lexbor core
++#endif
++#if WADAMESH_ARCADE3D
++#include "arcade3d_app.h"      // Apps → OutRun: pseudo-3D racer (esp32s3-arcade-3d)
++#endif
++#if WADAMESH_VOXELFLIGHT
++#include "voxel_flight_app.h"  // Apps → Voxel Flight: procedural flyer at panel size
++#endif
+ #include "LuaHost.h"          // Lua app host (LUA_APPS.md; Phase 0 spike gate)
+ #include "LuaAppHost.h"       // sandboxed Lua apps (LUA_APPS.md Phase 1; self-gated on CAP_LUA_APPS)
+ 
+@@ -3101,6 +3125,13 @@ lv_coord_t appPageContentH() {
+   return (lv_coord_t)(lv_disp_get_ver_res(nullptr) - appPageContentTop());
+ }
+ 
++lv_coord_t appPageBarCover() {
++  // statusBarCurH() is the bar the page really has: two rows after
++  // appPageBegin(), one after appPageBeginSlim().
++  const lv_coord_t cover = statusBarCurH() - appPageContentTop();
++  return cover > 0 ? cover : 0;
++}
++
+ lv_obj_t* appPageCreateRoot(uint32_t bg_color) {
+   lv_obj_t* root = lv_obj_create(lv_layer_top());
+   lv_obj_remove_style_all(root);
+@@ -3231,6 +3262,8 @@ static void batteryTapCb(lv_event_t* e);   // fwd decl (defined near the battery
+ volatile bool g_usb_files_owns_serial = false;
+ static volatile uint32_t g_sd_io_ms = 0;
+ static inline void markSdIo() { const uint32_t t = millis(); g_sd_io_ms = t ? t : 1; }
++// Firmware helpers outside this TU (http_download.cpp) light the same LED.
++extern "C" void meshcomodMarkSdIo(void) { markSdIo(); }
+ 
+ // Async mesh-request activity: a small spinner glyph in the status bar while a
+ // request is sending or awaiting a reply. markMeshRequest() stamps a send; the
+@@ -10926,6 +10959,18 @@ static void applySwipeGesture(int8_t swipe_x, int8_t swipe_y) {
+     else if (swipe_y != 0) SnakeGame::steer(0, swipe_y < 0 ? -1 : 1);
+     return;
+   }
++#if WADAMESH_ARCADE3D
++  if (Arcade3dApp::isOpen()) {
++    if (swipe_x != 0) Arcade3dApp::steer(swipe_x < 0 ? -1 : 1, 0);
++    return;
++  }
++#endif
++#if WADAMESH_VOXELFLIGHT
++  if (VoxelFlightApp::isOpen()) {
++    if (swipe_x != 0 || swipe_y != 0) VoxelFlightApp::steer(swipe_x, swipe_y);
++    return;
++  }
++#endif
+   // Every OTHER full-screen app page (Airtime, Spectrum, RF Monitor, Discover, VNC, Remote,
+   // Reader) also owns the screen, so swallow the swipe instead of letting it reach the tab
+   // switcher behind the page. Making the page root opaque + CLICKABLE only stops CLICKS:
+@@ -56221,6 +56401,12 @@ static void updateTrackball(unsigned long now) {
+     s_tb_click_prev_app = click_now;
+     if (moved && (dx != 0 || dy != 0)) {
+       if (luaAppIsOpen()) luaAppSteer(dx, dy);
++#if WADAMESH_ARCADE3D
++      else if (Arcade3dApp::isOpen()) Arcade3dApp::steer(dx, dy);
++#endif
++#if WADAMESH_VOXELFLIGHT
++      else if (VoxelFlightApp::isOpen()) VoxelFlightApp::steer(dx, dy);
++#endif
+       else                SnakeGame::steer(dx, dy);
+       if (g_lv.task) g_lv.task->noteUserInput();
+     }
+@@ -61854,6 +62040,32 @@ static unsigned long s_hw_last_space_ms = 0;
+ // Route a physical-keyboard character into the textarea currently being edited
+ // — the on-screen keyboard's target, which is the chat composer directly or the
+ // settings mirror textarea. No field open -> the key is ignored.
++// A full-screen app page's own field (browser URL bar, Kiwix search/URL, ...).
++// While it is bound, handleHwKey() types into it directly: the nav handling
++// below would otherwise move focus onto the tab bar hidden BEHIND the page.
++static lv_obj_t* s_page_text_field = nullptr;
++
++// CJK IME (firmware/tdeck-plus/ime): Off / Japanese / Chinese. Declared here so
++// the typing paths below can call it without the UI translation unit including it.
++bool imeHandleKey(lv_obj_t* ta, int key);
++void imeDismissUi(void);
++
++void appPageBindTextField(lv_obj_t* ta) {
++  if (ta && !lv_obj_is_valid(ta)) ta = nullptr;
++  if (s_page_text_field && s_page_text_field != ta && lv_obj_is_valid(s_page_text_field))
++    lv_obj_clear_state(s_page_text_field, LV_STATE_FOCUSED);
++  if (!ta) imeDismissUi();
++  s_page_text_field = ta;
++  if (!g_lv.keyboard) return;
++  // Hidden on purpose: these boards have a real keyboard (see the composer path).
++  lv_obj_add_flag(g_lv.keyboard, LV_OBJ_FLAG_HIDDEN);
++  lv_keyboard_set_textarea(g_lv.keyboard, ta);
++  // nullptr leaves typing mode too, so the nav keys work again after the page
++  // releases its field (closing a page must not strand the UI in edit mode).
++  s_nav_ta_editing = ta != nullptr;
++  if (ta) lv_obj_add_state(ta, LV_STATE_FOCUSED);
++}
++
+ static void handleHwKey(int key) {
+   if (key != ' ') s_hw_last_space_ms = 0;
+   if (!g_lv.keyboard) return;
+@@ -63476,7 +63728,9 @@ static void showSubtleNotifyLvgl(const char* text, uint32_t duration_ms) {
+   }
+ 
+   if (!s_notify_chip) {
+-    s_notify_chip = lv_obj_create(lv_layer_top());
++    // lv_layer_sys (with the status bar), not lv_layer_top: AppPages are opaque
++    // full-screen children of lv_layer_top and would cover a chip parented there.
++    s_notify_chip = lv_obj_create(lv_layer_sys());
+     lv_obj_remove_style_all(s_notify_chip);
+     lv_obj_set_size(s_notify_chip, LV_SIZE_CONTENT, LV_SIZE_CONTENT);  // hugs the text
+     lv_obj_set_style_bg_opa(s_notify_chip, LV_OPA_90, LV_PART_MAIN);
+@@ -66919,6 +67173,30 @@ enum AppDrawerAction {
+   APPACT_SOUND,
+   APPACT_DRONE,
+   APPACT_PHOTOS,
++#if WADAMESH_KIWIX
++  APPACT_KIWIX,
++#endif
++#if WADAMESH_ESP32AI
++  APPACT_ESP32AI,
++#endif
++#if WADAMESH_PERIODIC
++  APPACT_PERIODIC,
++#endif
++#if WADAMESH_LOCALSEND
++  APPACT_LOCALSEND,
++#endif
++#if WADAMESH_DOWNLOAD
++  APPACT_DOWNLOAD,
++#endif
++#if WADAMESH_BROWSER
++  APPACT_BROWSER,
++#endif
++#if WADAMESH_ARCADE3D
++  APPACT_ARCADE3D,
++#endif
++#if WADAMESH_VOXELFLIGHT
++  APPACT_VOXELFLIGHT,
++#endif
+   APPACT_LUA_BASE = 100,   // APPACT_LUA_BASE + i = installed Lua app s_lua_inst[i]
+ };
+ // OTP Messenger (app drawer -> APPACT_OTP): the screens; protocol in OtpCore.cpp.
+@@ -67052,7 +67330,10 @@ static const AppTileDef k_app_tiles[] = {
+ #endif
+   { UI_ICON_SLIDERS_HORIZONTAL, "Settings",  APPACT_SETTINGS,  HUE_SYS },     // "!" when an update waits
+ #if defined(MULTI_TRANSPORT_COMPANION) && CAP_WEB_BROWSER
+-  { UI_ICON_GLOBE,              "Web",       APPACT_READER,    HUE_PLACE },   // on-device text browser
++  { UI_ICON_GLOBE,              "Web",       APPACT_READER,    HUE_PLACE },   // on-device text browser (upstream)
++#endif
++#if WADAMESH_BROWSER
++  { UI_ICON_MONITOR,            "Browser",   APPACT_BROWSER,   HUE_PLACE },   // HTML/CSS via Lexbor
+ #endif
+ #if CAP_FILESYSTEM || defined(TLORA_PAGER)
+   { UI_ICON_FOLDER,             "Files",     APPACT_FILES,     HUE_SYS },
+@@ -67067,6 +67348,27 @@ static const AppTileDef k_app_tiles[] = {
+   { UI_ICON_GAMEPAD_2,          "Snake",     APPACT_SNAKE,     HUE_MSG },     // native snake (Lua boards install it from the Store)
+ #else
+   { UI_ICON_STORE,              "Store",     APPACT_STORE,     HUE_MSG },     // Lua app store
++#endif
++#if WADAMESH_KIWIX
++  { UI_ICON_FILE_TEXT,          "Kiwix",     APPACT_KIWIX,     HUE_SYS },     // ZIM archives on the card
++#endif
++#if WADAMESH_ESP32AI
++  { UI_ICON_ZAP,                "ESP-AI",    APPACT_ESP32AI,   HUE_MSG },     // model assets on the card
++#endif
++#if WADAMESH_PERIODIC
++  { UI_ICON_LAYOUT_GRID,        "Elements",  APPACT_PERIODIC,  HUE_SYS },     // periodic table, tap for details
++#endif
++#if WADAMESH_LOCALSEND
++  { UI_ICON_SHARE_2,            "LocalSend",  APPACT_LOCALSEND, HUE_SYS },     // receive / send on the LAN (HTTP)
++#endif
++#if WADAMESH_DOWNLOAD
++  { UI_ICON_LINK,               "Download",   APPACT_DOWNLOAD,  HUE_SYS },     // any http(s) URL to the card
++#endif
++#if WADAMESH_ARCADE3D
++  { UI_ICON_GAUGE,              "OutRun",     APPACT_ARCADE3D,  HUE_MSG },     // pseudo-3D racer
++#endif
++#if WADAMESH_VOXELFLIGHT
++  { UI_ICON_COMPASS,            "Voxel",      APPACT_VOXELFLIGHT, HUE_MSG },   // procedural voxel flight
+ #endif
+   { UI_ICON_HOUSE,              "Home",      APPACT_CMDCENTER, HUE_SYS },     // back to the Home widgets
+   { UI_ICON_POWER,              "Power",     APPACT_POWER,     kAppHueDanger },
+@@ -67452,6 +67754,9 @@ static void appLaunch(int act, lv_event_t* e) {
+ #endif
+ #if defined(MULTI_TRANSPORT_COMPANION) && CAP_WEB_BROWSER
+     case APPACT_READER:    openReaderPage();     return;   // on-device text browser (no proxy)
++#endif
++#if WADAMESH_BROWSER
++    case APPACT_BROWSER:   BrowserApp::launch(); return;   // Lexbor HTML/CSS layout
+ #endif
+     case APPACT_ADVERT:    openAdvertModalCb(e);  return;
+     case APPACT_POWER:     openPowerMenu();      return;
+@@ -67463,6 +67768,27 @@ static void appLaunch(int act, lv_event_t* e) {
+ #else
+     case APPACT_SNAKE:     SnakeGame::launch();  return;
+ #endif
++#if WADAMESH_KIWIX
++    case APPACT_KIWIX:     KiwixApp::launch();   return;   // offline ZIM archives on the card
++#endif
++#if WADAMESH_ESP32AI
++    case APPACT_ESP32AI:   Esp32AiApp::launch(); return;   // model manager, assets on the card
++#endif
++#if WADAMESH_PERIODIC
++    case APPACT_PERIODIC:  PeriodicApp::launch(); return;  // 118 elements, tap for details
++#endif
++#if WADAMESH_LOCALSEND
++    case APPACT_LOCALSEND: LocalSendApp::launch(); return; // receive onto the card; send to a peer
++#endif
++#if WADAMESH_DOWNLOAD
++    case APPACT_DOWNLOAD:  DownloadApp::launch();  return; // any http(s) URL to the card
++#endif
++#if WADAMESH_ARCADE3D
++    case APPACT_ARCADE3D:  Arcade3dApp::launch(); return;  // OutRun-style pseudo-3D racer
++#endif
++#if WADAMESH_VOXELFLIGHT
++    case APPACT_VOXELFLIGHT: VoxelFlightApp::launch(); return; // procedural flyer at panel size
++#endif
+ #if defined(HAS_TOUCH_UI)
+     case APPACT_TERMINAL:  homeTerminalCb(e);    return;
+ #endif
+@@ -96857,3 +97221,23 @@ static void docAuditFocus() {
+ }
+ #endif
+ #endif  // DOC_CAPTURE
++
++// ---- Kiwix bridge ---------------------------------------------------------
++// firmware/tdeck-plus/kiwix/kiwix_app.cpp writes one ZIM article out as local
++// HTML on the card and calls this. Handing it to the Reader that already ships
++// here means scrolling, keyboard/trackball navigation and the back bar are the
++// firmware's own, not a second document renderer. Declared extern "C" in
++// kiwix_app.cpp so the name does not depend on C++ mangling.
++#if WADAMESH_KIWIX
++// The Reader itself is built when MULTI_TRANSPORT_COMPANION is on (it is on the
++// T-Deck); the guard keeps this file compiling on envs that have no Reader.
++#if defined(ESP32) && defined(MULTI_TRANSPORT_COMPANION)
++extern "C" void wadameshOpenReaderUrl(const char* url) { openReaderPage(url); }
++#endif
++#endif
++
++// Firmware AppPages call this so their status toasts use the same system-layer
++// banner as the rest of the UI (visible above tall AppPage chrome on lv_layer_top).
++extern "C" void wadameshShowAlert(const char* text, int duration_ms) {
++  if (g_lv.task) g_lv.task->showAlert(text, duration_ms > 0 ? duration_ms : 2400);
++}

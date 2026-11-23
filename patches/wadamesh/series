@@ -1,2 +1,6 @@
-0001-kiwix-esp32ai-periodic-apps.patch
-0002-wifi-off-on-battery.patch
+0001-apps-build-wiring.patch
+0002-app-pages-and-drawer.patch
+0003-reader-fetch-and-progress.patch
+0004-keyboard-ime-and-back.patch
+0005-sd-format-menu.patch
+0006-wifi-off-on-battery.patch

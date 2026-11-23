@@ -1,0 +1,163 @@
+diff --git a/platformio.ini b/platformio.ini
+--- a/platformio.ini
++++ b/platformio.ini
+@@ -544,7 +544,13 @@ platform = platformio/espressif32@6.11.0
+ framework = arduino
+ board = t-deck
+ monitor_speed = 115200
+-board_build.partitions = variants/lilygo_tdeck/partitions_tdeck_touch_big_app.csv   ; 4.5 MB app slots (Flock You, then beta_103); one USB install to adopt
++; USB-only updates: one 7.75 MB app slot instead of the fork's two 4.5 MB OTA
++; slots. Tiles and spiffs keep the offsets this repository has always used
++; (partitions_tdeck_touch.csv), so re-flashing one of our devices keeps the map
++; tile cache and every stored preference. A card moved here from a stock -tak
++; build gets the tile partition re-laid-out (cache re-fetched); spiffs, and so
++; prefs/contacts/chats, is untouched.
++board_build.partitions = ../../firmware/tdeck-plus/partitions_tdeck_browser.csv
+ extra_scripts = pre:scripts/build/pre_gen_baked.py, pre:scripts/inject_wifi_env.py, pre:scripts/build/fatfs_exfat.py, pre:scripts/build/patch_lvgl_anim_uaf.py, pre:scripts/build/patch_lvgl_scroll_uaf.py, pre:scripts/build/patch_lvgl_async_del.py, pre:scripts/build/patch_lvgl_arabic.py, pre:scripts/build/patch_meshcore_txt_timestamp.py, pre:scripts/build/perf_lvgl.py, merge-bin.py
+ custom_lvgl_o2 = core, draw, font, misc   ; LVGL's per-frame code at -O2 (scripts/build/perf_lvgl.py); widgets and extra stay -Os
+ ; custom_lvgl_iram = lv_draw_sw_blend.c, lv_draw_label.c   ; off on the T-Deck: its ~6 KB of internal RAM is worth more than ~8% of a frame (on-device updates and TLS ran out)
+@@ -686,6 +692,72 @@ build_flags =
+   -D CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=16384
+   -D CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=4096
+ 
++  ; --- Kiwix (ZIM) reader: this repository's sources + pinned zstd ---
++  ; WADAMESH_KIWIX guards the app hook in UITask.cpp, so this env (and only
++  ; this env) compiles the Kiwix app; the other T-Deck-adjacent envs still build
++  ; from the unpatched UI.
++  -D WADAMESH_KIWIX=1
++  ; Paths are relative to this project (third_party/wadamesh), so ../.. is
++  ; the repository root. The app is compiled into this env instead of being
++  ; vendored into the submodule.
++  -I ../../firmware/tdeck-plus/ime
++  -I ../../firmware/tdeck-plus/kiwix
++  -I ../../third_party/zstd/lib
++  -D ZSTD_LEGACY_SUPPORT=0
++  -D ZSTD_MULTITHREAD=0
++  -D ZSTD_DISABLE_ASM=1
++  -D ZSTD_STRIP_ERROR_STRINGS=1
++
++  ; --- CJK IME: libgooglepinyin engine (LVGL-free) + SD dictionaries ---
++  ; No -include pinyinime_compat.h: that shim is for MinGW host tests. On
++  ; ESP-IDF, libgooglepinyin already uses real pthread; a global -include
++  ; pulls sys/select.h into every TU and breaks lib/ed25519 (static select()).
++  -I ../../third_party/lvgl_pinyin_ime/include
++  -I ../../third_party/lvgl_pinyin_ime/src/third_party/libgooglepinyin/include
++  -I ../../third_party/lvgl_pinyin_ime/src/third_party/libgooglepinyin/port
++  -D PINYINIME_RUNTIME_ONLY=1
++
++  ; --- esp32-ai: SD-backed TinyStories runtime (llm.h) + asset manager ---
++  -D WADAMESH_ESP32AI=1
++  -D LLM_INT8_ACT=1
++  -I ../../firmware/tdeck-plus/common
++  -I ../../firmware/tdeck-plus/esp32ai
++  -I ../../firmware/tdeck-plus/esp32ai/generated
++  -I ../../third_party/esp32-ai/runtime
++
++  ; --- periodic table: NeoCalculator's element data, drawn as one LVGL grid ---
++  -D WADAMESH_PERIODIC=1
++  -I ../../firmware/tdeck-plus/periodic
++  -I ../../third_party/neocalculator/src/apps
++
++  ; --- LocalSend: receive onto the card; send to a peer (HTTP protocol v2) ---
++  -D WADAMESH_LOCALSEND=1
++  -D WADAMESH_USB_ONLY_UPDATES=1
++  -I ../../firmware/tdeck-plus/localsend
++
++  ; --- Download: any http(s) URL straight to the card ---
++  -D WADAMESH_DOWNLOAD=1
++  -I ../../firmware/tdeck-plus/downloader
++
++  ; --- Browser: HTML + basic CSS through the pinned TactileBrowser core ---
++  ; Lexbor's legacy encoding tables are const (patches/TactileBrowser), so they
++  ; live in flash instead of the ~760 KB of DRAM they would otherwise claim.
++  -D WADAMESH_BROWSER=1
++  -D LEXBOR_STATIC=1
++  -I ../../firmware/tdeck-plus/browser
++  -I ../../third_party/TactileBrowser/tactilebrowser_core/include
++  -I ../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source
++  -I ../../build/duktape
++
++  ; --- OutRun (esp32s3-arcade-3d) + Voxel Flight ---
++  ; Game engines live in third_party/ as submodules; firmware/ only has AppPage hosts.
++  -D WADAMESH_ARCADE3D=1
++  -I ../../third_party/esp32s3-arcade-3d
++  -I ../../firmware/tdeck-plus/arcade3d
++  -D WADAMESH_VOXELFLIGHT=1
++  -I ../../third_party/voxel-flight
++  -I ../../firmware/tdeck-plus/voxel_flight
++
+ build_src_filter =
+   +<*.cpp>
+   +<*.c>
+@@ -696,6 +768,53 @@ build_src_filter =
+   +<ui-touch/*.cpp>
+   +<ui-touch/*.c>
+   +<../variants/lilygo_tdeck/*.cpp>
++  +<../../../firmware/tdeck-plus/ime/*.cpp>
++  +<../../../third_party/lvgl_pinyin_ime/src/core/ime_engine_port.cpp>
++  +<../../../third_party/lvgl_pinyin_ime/src/third_party/libgooglepinyin/src/*.cpp>
++  -<../../../third_party/lvgl_pinyin_ime/src/third_party/libgooglepinyin/src/dictbuilder.cpp>
++  -<../../../third_party/lvgl_pinyin_ime/src/third_party/libgooglepinyin/src/utf16reader.cpp>
++  +<../../../firmware/tdeck-plus/kiwix/*.cpp>
++  +<../../../firmware/tdeck-plus/common/*.cpp>
++  +<../../../firmware/tdeck-plus/esp32ai/*.cpp>
++  +<../../../firmware/tdeck-plus/periodic/*.cpp>
++  +<../../../firmware/tdeck-plus/localsend/*.cpp>
++  +<../../../firmware/tdeck-plus/downloader/*.cpp>
++  +<../../../firmware/tdeck-plus/browser/*.cpp>
++  +<../../../third_party/esp32s3-arcade-3d/*.cpp>
++  +<../../../firmware/tdeck-plus/arcade3d/*.cpp>
++  +<../../../third_party/voxel-flight/*.cpp>
++  +<../../../firmware/tdeck-plus/voxel_flight/*.cpp>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/src/*.cpp>
++  +<../../../build/duktape/duktape.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/core/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/css/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/css/at_rule/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/css/property/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/css/selectors/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/css/syntax/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/css/syntax/tokenizer/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/dom/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/dom/interfaces/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/encoding/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/engine/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/html/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/html/interfaces/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/html/tokenizer/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/html/tree/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/html/tree/insertion_mode/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/ns/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/punycode/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/selectors/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/style/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/style/dom/interfaces/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/style/html/interfaces/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/tag/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/unicode/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/url/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/utils/*.c>
++  +<../../../third_party/TactileBrowser/tactilebrowser_core/lexbor/source/lexbor/ports/posix/lexbor/core/memory.c>
++  +<../../../third_party/zstd/lib/common/*.c>
++  +<../../../third_party/zstd/lib/decompress/*.c>
+ 
+ lib_deps =
+   https://github.com/ALLFATHER-BV/meshcomod.git#core-v1.18.0
+diff --git a/src/ui-touch/device_caps.h b/src/ui-touch/device_caps.h
+--- a/src/ui-touch/device_caps.h
++++ b/src/ui-touch/device_caps.h
+@@ -183,7 +183,13 @@
+   #define CAP_SD           1
+   #define CAP_FILESYSTEM   1
+   #define CAP_GPS          1   // CC1167Q on UART
++  #if WADAMESH_USB_ONLY_UPDATES
++  // This build's partition table has ONE 7.75 MB app slot, so there is no
++  // second slot to write an OTA image into: updates are USB only.
++  #define CAP_OTA          0
++  #else
+   #define CAP_OTA          1   // 16 MB flash, dual A/B app slots (see partitions_tdeck_touch.csv)
++  #endif
+   #define CAP_LOCK_SCREEN  1
+ 
+ #elif defined(HAS_RAK_TAP_V2)         // ===== RAK WisMesh Tap V2 (ESP32-S3) =====
+

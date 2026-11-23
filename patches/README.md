@@ -22,12 +22,25 @@ Do not land pure formatting-only diffs in patches.
 
 ## wadamesh (`jade-on-mesh/wadamesh-tak`)
 
-* `0001-kiwix-esp32ai-periodic-apps.patch` — drawer tiles / `appLaunch` for the
-  apps under `firmware/tdeck-plus/`, `platformio.ini` include +
-  `build_src_filter` (including arcade/voxel submodules), Reader bridge,
-  `wadameshShowAlert`, Browser/Reader status hooks.
-* `0002-wifi-off-on-battery.patch` — Settings → Battery → “Wi‑Fi off on battery”
-  (default on). Runtime hold gates `wifiConfigWantsWifi()`; USB clears it.
+* `0001-apps-build-wiring.patch` — the T-Deck env: single-slot partition table,
+  include paths and `build_src_filter` for every app plus the arcade/voxel
+  engines, `WADAMESH_*` guards, and `CAP_OTA 0` (USB-only updates).
+* `0002-app-pages-and-drawer.patch` — `appPageBarCover()` /
+  `appPageBindTextField()` and the firmware's status helper, the drawer tiles and
+  `appLaunch` cases for the apps under `firmware/tdeck-plus/`, trackball/swipe
+  steering for the games, the Kiwix → Reader bridge, `wadameshShowAlert`, and
+  the system-layer notification chip.
+* `0003-reader-fetch-and-progress.patch` — the Reader's own redirect loop (up to
+  4 hops, absolute and relative), live fetch-stage labels, the bigger raw
+  buffer, and the shared Web font picker.
+* `0004-keyboard-ime-and-back.patch` — physical-keyboard routing into an app
+  page's text field, CJK IME hooks for Space / Enter / printable keys, and the
+  status-bar back gesture (tap, not touch-down) for every full-screen page.
+* `0005-sd-format-menu.patch` — the FAT32 / exFAT chooser behind SD format and
+  the deferred format applying the chosen option.
+* `0006-wifi-off-on-battery.patch` — Settings → Battery → “Wi‑Fi off on battery”
+  (default on). Runtime hold gates `wifiConfigWantsWifi()`; USB clears it, and
+  `test/test_touch_prefs_schema.cpp` covers the new trailing field.
 
 ## Game engines
 
