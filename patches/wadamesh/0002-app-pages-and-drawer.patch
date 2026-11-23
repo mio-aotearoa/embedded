@@ -115,39 +115,6 @@ diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
        else                SnakeGame::steer(dx, dy);
        if (g_lv.task) g_lv.task->noteUserInput();
      }
-@@ -61854,6 +62040,32 @@ static unsigned long s_hw_last_space_ms = 0;
- // Route a physical-keyboard character into the textarea currently being edited
- // — the on-screen keyboard's target, which is the chat composer directly or the
- // settings mirror textarea. No field open -> the key is ignored.
-+// A full-screen app page's own field (browser URL bar, Kiwix search/URL, ...).
-+// While it is bound, handleHwKey() types into it directly: the nav handling
-+// below would otherwise move focus onto the tab bar hidden BEHIND the page.
-+static lv_obj_t* s_page_text_field = nullptr;
-+
-+// CJK IME (firmware/tdeck-plus/ime): Off / Japanese / Chinese. Declared here so
-+// the typing paths below can call it without the UI translation unit including it.
-+bool imeHandleKey(lv_obj_t* ta, int key);
-+void imeDismissUi(void);
-+
-+void appPageBindTextField(lv_obj_t* ta) {
-+  if (ta && !lv_obj_is_valid(ta)) ta = nullptr;
-+  if (s_page_text_field && s_page_text_field != ta && lv_obj_is_valid(s_page_text_field))
-+    lv_obj_clear_state(s_page_text_field, LV_STATE_FOCUSED);
-+  if (!ta) imeDismissUi();
-+  s_page_text_field = ta;
-+  if (!g_lv.keyboard) return;
-+  // Hidden on purpose: these boards have a real keyboard (see the composer path).
-+  lv_obj_add_flag(g_lv.keyboard, LV_OBJ_FLAG_HIDDEN);
-+  lv_keyboard_set_textarea(g_lv.keyboard, ta);
-+  // nullptr leaves typing mode too, so the nav keys work again after the page
-+  // releases its field (closing a page must not strand the UI in edit mode).
-+  s_nav_ta_editing = ta != nullptr;
-+  if (ta) lv_obj_add_state(ta, LV_STATE_FOCUSED);
-+}
-+
- static void handleHwKey(int key) {
-   if (key != ' ') s_hw_last_space_ms = 0;
-   if (!g_lv.keyboard) return;
 @@ -63476,7 +63728,9 @@ static void showSubtleNotifyLvgl(const char* text, uint32_t duration_ms) {
    }
  

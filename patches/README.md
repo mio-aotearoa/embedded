@@ -26,15 +26,16 @@ Do not land pure formatting-only diffs in patches.
   include paths and `build_src_filter` for every app plus the arcade/voxel
   engines, `WADAMESH_*` guards, and `CAP_OTA 0` (USB-only updates).
 * `0002-app-pages-and-drawer.patch` — `appPageBarCover()` /
-  `appPageBindTextField()` and the firmware's status helper, the drawer tiles and
+  the `appPageBindTextField()` declaration) and the firmware's status helper, the drawer tiles and
   `appLaunch` cases for the apps under `firmware/tdeck-plus/`, trackball/swipe
   steering for the games, the Kiwix → Reader bridge, `wadameshShowAlert`, and
   the system-layer notification chip.
 * `0003-reader-fetch-and-progress.patch` — the Reader's own redirect loop (up to
   4 hops, absolute and relative), live fetch-stage labels, the bigger raw
   buffer, and the shared Web font picker.
-* `0004-keyboard-ime-and-back.patch` — physical-keyboard routing into an app
-  page's text field, CJK IME hooks for Space / Enter / printable keys, and the
+* `0004-keyboard-ime-and-back.patch` — the page text-field binding
+  (`appPageBindTextField()`) and the physical-keyboard routing into it, CJK IME
+  hooks for Space / Enter / printable keys, and the
   status-bar back gesture (tap, not touch-down) for every full-screen page.
 * `0005-sd-format-menu.patch` — the FAT32 / exFAT chooser behind SD format and
   the deferred format applying the chosen option.
