@@ -147,8 +147,9 @@ jobs:
         if: failure()
         run: |
           tail -n 80 /tmp/firmware.log || true
-          line="$(grep -m1 -iE 'error|failed|cannot|not found' /tmp/firmware.log | head -c 300 || true)"
-          echo "::error::firmware build: ${line:-see the Build step log}"
+          size="$(wc -c < /tmp/firmware.log 2>/dev/null || echo missing)"
+          summary="$(tail -n 6 /tmp/firmware.log 2>/dev/null | tr '\n' ' ' | tr -s ' ' | head -c 400)"
+          echo "::error::firmware build (${size} bytes): ${summary:-empty log}"
       - name: Build log
         if: always()
         uses: actions/upload-artifact@v4
