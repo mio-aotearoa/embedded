@@ -140,6 +140,15 @@ jobs:
         run: |
           set -o pipefail
           nix develop -c bash -x firmware/tdeck-plus/build.sh 2>&1 | tee /tmp/firmware.log
+      # Print the tail inline and publish the first error line as an annotation,
+      # so the failure is visible in the run summary without downloading
+      # artifacts (which need a token).
+      - name: Build log tail
+        if: failure()
+        run: |
+          tail -n 80 /tmp/firmware.log || true
+          line="$(grep -m1 -iE 'error|failed|cannot|not found' /tmp/firmware.log | head -c 300 || true)"
+          echo "::error::firmware build: ${line:-see the Build step log}"
       - name: Build log
         if: always()
         uses: actions/upload-artifact@v4

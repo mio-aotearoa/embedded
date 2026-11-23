@@ -13,7 +13,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ENV_NAME="${PIOENV:-LilyGo_TDeck_companion_radio_touch}"
 
-die() { echo "error: $*" >&2; exit 1; }
+die() {
+    echo "error: $*" >&2
+    # Surface it as an annotation when run from GitHub Actions.
+    if [ "${GITHUB_ACTIONS:-}" = "true" ]; then echo "::error::tdeck build: $*"; fi
+    exit 1
+}
 
 cd "$ROOT"
 
