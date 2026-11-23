@@ -28,6 +28,7 @@ Chinese (libgooglepinyin); dictionaries + `cjk14.bin` on `/ime/` (see
 ```
 firmware/tdeck-plus/   apps + build.sh
 patches/wadamesh/      0001-0005 app/reader/keyboard/SD wiring · 0006 Wi‑Fi off on battery
+patches/esp32-ai/      LLM_DEQ_ROW hook for SD-backed TinyStories weights
 patches/esp32s3-arcade-3d/   manual steer / hill throttle
 patches/voxel-flight/        RGB565 host framebuffer
 third_party/wadamesh|esp32s3-arcade-3d|voxel-flight|…

@@ -46,6 +46,9 @@ jobs:
             experimental-features = nix-command flakes
       - name: nixfmt
         run: nix develop -c nixfmt --check flake.nix
+      # E1002 variant/radio guards are pure Python; they need no IDF.
+      - name: E1002 host tests
+        run: python3 -m unittest discover -s firmware/reterminal-e1002/test -v
       - name: Build and run
         run: |
           nix build .#host-tests --print-build-logs
@@ -69,8 +72,9 @@ jobs:
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
+      # Only the wadamesh series: the E1002 series has its own job.
       - name: Apply the series the suite tests
-        run: ./scripts/patches.sh apply
+        run: ./scripts/patches.sh apply wadamesh
       - name: Run the upstream host tests against the patched tree
         run: nix develop -c bash -c 'cd third_party/wadamesh && CXX=g++ CC=gcc bash scripts/run-host-tests.sh'
 
