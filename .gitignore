@@ -14,6 +14,9 @@ result-*
 build/
 third_party/out/
 
+# Project-local ESP-IDF checkout (firmware/reterminal-e1002/README.md).
+.toolchains/
+
 # generated card assets (pinyin dictionary, etc.)
 out/
 

@@ -53,8 +53,10 @@ Do not land pure formatting-only diffs in patches.
 
 ## Other series
 
-* **esp32-photoframe** — `EXTRA_COMPONENT_DIRS` for this repo’s `components/`;
-  AirDrop boot window → display pipeline.
+* **esp32-photoframe** — `0001` `EXTRA_COMPONENT_DIRS` for this repo’s
+  `components/` and absolute `SDKCONFIG_DEFAULTS`; `0002` the AirDrop boot
+  window (hold wake at power-on → receive → display pipeline); `0003` coex
+  guards: HTTP mutations blocked while AWDL is active, sleep/rotate deferred.
 * **ESP32Drop** — borrow STA for coex.
 * **esp-wifi-hal** / **FoA** — ESP32-S3 support.
 * **TactileBrowser** (Lexbor via `dir`) — encoding tables `const` (DRAM → flash).

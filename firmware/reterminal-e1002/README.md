@@ -43,7 +43,8 @@ nix develop   # optional: Node/CMake/Ninja/esptool from the flake
 ./firmware/reterminal-e1002/build.sh open     # FoA; no IDF required
 ```
 
-The IDF builder applies both patch series and generates web/splash assets.
+The IDF builder applies the three photoframe patches and ESP32Drop's, then
+generates web/splash assets.
 `--skip-assets` reuses existing assets; `--build-dir PATH` changes the output
 parent. If native splash generation fails, use
 [`scripts/pack_splash.py`](../../scripts/pack_splash.py) with ImageMagick and
