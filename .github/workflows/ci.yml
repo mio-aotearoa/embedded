@@ -44,6 +44,8 @@ jobs:
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
+      - name: nixfmt
+        run: nix develop -c nixfmt --check flake.nix
       - name: Build and run
         run: |
           nix build .#host-tests --print-build-logs

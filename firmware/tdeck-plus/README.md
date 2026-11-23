@@ -44,8 +44,8 @@ firmware/tdeck-plus/build.sh -t upload
 nix run .#firmware
 ```
 
-`build.sh` applies the wadamesh (and game) series, refuses a non-wadamesh-tak
-checkout, then `pio run`. Status: `./scripts/patches.sh status wadamesh`.
+`build.sh` applies the wadamesh, browser, esp32-ai and game series, refuses a
+non-wadamesh-tak checkout, then `pio run`. Status: `./scripts/patches.sh status wadamesh`.
 
 ## Kiwix
 

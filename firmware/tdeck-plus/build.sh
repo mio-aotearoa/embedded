@@ -25,9 +25,10 @@ case "$remote" in
 esac
 
 # wadamesh carries the app hooks; TactileBrowser makes Lexbor's encoding
-# tables const so the browser's HTML/CSS engine fits in flash, not DRAM.
+# tables const so the browser's HTML/CSS engine fits in flash, not DRAM;
+# esp32-ai adds the LLM_DEQ_ROW hook the ESP-AI app's SD-backed weights need.
 ./scripts/patches.sh apply wadamesh TactileBrowser TactileBrowserCore \
-  esp32s3-arcade-3d voxel-flight
+  esp32-ai esp32s3-arcade-3d voxel-flight
 
 # Duktape ships raw sources only: build its amalgamation (build/duktape/).
 ./scripts/duktape.sh

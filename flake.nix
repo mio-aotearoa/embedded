@@ -155,7 +155,7 @@
 
               cd "$root"
               ./scripts/patches.sh apply wadamesh TactileBrowser TactileBrowserCore \
-                esp32s3-arcade-3d voxel-flight
+                esp32-ai esp32s3-arcade-3d voxel-flight
               ./scripts/duktape.sh
 
               export PLATFORMIO_CORE_DIR="''${PLATFORMIO_CORE_DIR:-$root/.platformio}"
@@ -222,6 +222,8 @@
               # wadamesh's scripts/run-host-tests.sh wants a real g++ (Apple's
               # /usr/bin/g++ is clang); CI runs that suite in this shell.
               pkgs.gcc
+              # `nix develop -c nixfmt --check flake.nix`; CI gates on it.
+              pkgs.nixfmt
             ];
             shellHook = ''
               export SSL_CERT_FILE="${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
