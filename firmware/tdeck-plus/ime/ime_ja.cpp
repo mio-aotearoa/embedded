@@ -36,9 +36,9 @@ void onKanjiPick(int index, void *user)
     if (!ta || !lv_obj_is_valid(ta)) return;
     const char *kanji = imeCandItem(index);
     if (!kanji || !kanji[0]) return;
-    // Replace trailing kana (same UTF-8 length as s_pendingKana) with kanji.
-    const size_t kanaBytes = strlen(s_pendingKana);
-    for (size_t i = 0; i < kanaBytes; ++i) lv_textarea_del_char(ta);
+    // LVGL deletes encoded characters, not UTF-8 bytes.
+    const size_t kanaChars = ime::utf8CharCount(s_pendingKana);
+    for (size_t i = 0; i < kanaChars; ++i) lv_textarea_del_char(ta);
     lv_textarea_add_text(ta, kanji);
     s_pendingKana[0] = 0;
 }

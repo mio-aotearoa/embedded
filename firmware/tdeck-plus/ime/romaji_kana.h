@@ -27,4 +27,7 @@ size_t romajiToKana(const char *romaji, char *out, size_t outCap, bool katakana)
 
 // True when `romaji` is a complete sequence of syllables (no dangling prefix).
 bool romajiIsComplete(const char *romaji);
+
+// Number of UTF-8 codepoints in a NUL-terminated string.
+size_t utf8CharCount(const char *text);
 }  // namespace ime

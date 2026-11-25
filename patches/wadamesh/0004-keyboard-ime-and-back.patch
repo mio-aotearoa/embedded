@@ -1,7 +1,7 @@
 diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
 --- a/src/ui-touch/UITask.cpp
 +++ b/src/ui-touch/UITask.cpp
-@@ -61854,6 +62040,32 @@ static unsigned long s_hw_last_space_ms = 0;
+@@ -61854,6 +62040,41 @@ static unsigned long s_hw_last_space_ms = 0;
  // Route a physical-keyboard character into the textarea currently being edited
  // — the on-screen keyboard's target, which is the chat composer directly or the
  // settings mirror textarea. No field open -> the key is ignored.
@@ -14,6 +14,7 @@ diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
 +// the typing paths below can call it without the UI translation unit including it.
 +bool imeHandleKey(lv_obj_t* ta, int key);
 +void imeDismissUi(void);
++void imeFontAttachFallback(lv_font_t* base);
 +
 +void appPageBindTextField(lv_obj_t* ta) {
 +  if (ta && !lv_obj_is_valid(ta)) ta = nullptr;
@@ -28,7 +29,15 @@ diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
 +  // nullptr leaves typing mode too, so the nav keys work again after the page
 +  // releases its field (closing a page must not strand the UI in edit mode).
 +  s_nav_ta_editing = ta != nullptr;
-+  if (ta) lv_obj_add_state(ta, LV_STATE_FOCUSED);
++  if (ta) {
++    // Use the chained fallback font first, then append the SD-backed CJK face.
++    // This keeps the existing Latin/Greek/Cyrillic glyphs while allowing the
++    // Japanese and Chinese candidates to render in the bound text field.
++    useChainedFont(ta);
++    imeFontAttachFallback(const_cast<lv_font_t*>(
++        lv_obj_get_style_text_font(ta, LV_PART_MAIN)));
++    lv_obj_add_state(ta, LV_STATE_FOCUSED);
++  }
 +}
 +
  static void handleHwKey(int key) {

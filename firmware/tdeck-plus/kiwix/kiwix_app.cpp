@@ -579,13 +579,13 @@ void KiwixApp::searchCb(lv_event_t* e)
 void KiwixApp::fieldBindCb(lv_event_t* e)
 {
     // Tapping either field hands the physical keyboard to it (they swap places).
-    appPageBindTextField(lv_event_get_target(e));
+    appPageBindTextField(static_cast<lv_obj_t*>(lv_event_get_target(e)));
 }
 
 void KiwixApp::imeToggleCb(lv_event_t* e)
 {
-    (void)e;
     imeModeCycle();
+    appPageBindTextField(lv_event_get_target(e));
     if (s_active)
         s_active->setStatus(imeMode() == IME_OFF ? TR("Type a title prefix, then Enter")
                                                  : imeModeStatus());

@@ -219,4 +219,15 @@ bool romajiIsComplete(const char *romaji)
     }
     return true;
 }
+
+size_t utf8CharCount(const char *text)
+{
+    if (!text) return 0;
+    size_t count = 0;
+    for (; *text; ++text)
+    {
+        if (((unsigned char)*text & 0xC0) != 0x80) ++count;
+    }
+    return count;
+}
 }  // namespace ime

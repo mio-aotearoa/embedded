@@ -95,10 +95,13 @@ bool imeHandleKey(lv_obj_t *ta, int key)
 {
     if (!ta) return false;
     if (s_mode == IME_OFF) return false;
-    if (imeCandVisible() &&
-        (key == ' ' || (key >= '1' && key <= '9') || key == 0x0D || key == 0x0A || key == 27))
+    if (imeCandVisible())
     {
-        return imeCandHandleKey(key);
+        if (key == ' ' || (key >= '1' && key <= '9') || key == 0x0D || key == 0x0A || key == 27)
+            return imeCandHandleKey(key);
+        // Any edit or cursor key invalidates the candidate list. The caller
+        // still handles the key normally after this returns false.
+        imeCandHide();
     }
     if (s_mode == IME_JA) return imeJaHandleKey(ta, key);
     if (s_mode == IME_ZH) return imeZhHandleKey(ta, key);

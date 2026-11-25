@@ -9,7 +9,7 @@ Physical-keyboard IME with dictionaries and a bitmap font on the SD card
 |---|---|---|
 | `dict_pinyin.dat` | libgooglepinyin system dict (~1.0 MB) | `scripts/pinyin-dict.sh` |
 | `skk_mdic.bin` | Japanese kanji (SKK middle, ~210 KB) | `scripts/skk-dict.sh` |
-| `cjk14.bin` | LVGL 8 bin font, 14px/1bpp (~0.5 MB) | `scripts/cjk-font.sh` |
+| `cjk14.bin` | LVGL 8 bin font, 14px/1bpp (~0.5 MB), including Japanese punctuation | `scripts/cjk-font.sh` |
 
 One-shot: `scripts/ime-assets.sh` → `out/ime/`. Publish the three files on the
 `ime-assets` orphan branch (Download presets fetch

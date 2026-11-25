@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # Build a single LVGL 8 binary CJK/kana font for /ime/cjk14.bin.
 #
-# Uses GNU Unifont (BMP coverage) + lv_font_conv. Ranges: ASCII, hiragana,
-# katakana, CJK Unified Ideographs basic block (U+4E00–U+9FFF is too large for
-# a 1.5 MB budget at 14px/2bpp, so we take the pinyin engine's valid_utf16.txt
-# codepoints instead — the glyphs the Chinese IME can actually emit — plus kana.
+# Uses Noto Sans SC + lv_font_conv. Ranges: ASCII, kana, Japanese punctuation,
+# half/fullwidth forms, and the pinyin engine's valid_utf16.txt codepoints. The
+# full CJK Unified Ideographs block is too large for the card-asset budget.
 #
 # Usage: scripts/cjk-font.sh [output-path]
 set -euo pipefail
@@ -49,6 +48,10 @@ for cp in range(0x20, 0x7F):
 for cp in range(0x3040, 0x30A0):  # hiragana
     chars.add(chr(cp))
 for cp in range(0x30A0, 0x3100):  # katakana
+    chars.add(chr(cp))
+for cp in range(0x3000, 0x3040):  # Japanese punctuation and CJK symbols
+    chars.add(chr(cp))
+for cp in range(0xFF00, 0xFFF0):  # half/fullwidth forms used by SKK candidates
     chars.add(chr(cp))
 # valid_utf16.txt is UTF-16LE code units, one per line or a blob — try both.
 data = open(hzs, "rb").read()

@@ -307,6 +307,7 @@ void DownloadApp::taCb(lv_event_t *e)
     if (code == LV_EVENT_LONG_PRESSED)
     {
         imeModeCycle();
+        appPageBindTextField(app->ta_);  // reattach after the SD font loads
         app->setStatus(imeMode() == IME_OFF ? TR("Type an http:// or https:// URL, then Download")
                                             : imeModeStatus());
         return;

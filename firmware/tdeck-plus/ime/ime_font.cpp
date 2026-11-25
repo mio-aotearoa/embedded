@@ -13,7 +13,7 @@ namespace
 lv_fs_drv_t s_drv;
 bool s_drvReady = false;
 lv_font_t *s_font = nullptr;
-bool s_tried = false;
+bool s_loadAttempted = false;
 
 void *fsOpen(lv_fs_drv_t *, const char *path, lv_fs_mode_t mode)
 {
@@ -91,9 +91,11 @@ void ensureDrv(void)
 bool imeFontEnsure(void)
 {
     if (s_font) return true;
-    if (s_tried) return false;
-    s_tried = true;
+    // Do not remember "missing", or downloading the card asset while the
+    // firmware is running would require a reboot before it could be used.
     if (!SD.exists(IME_CJK_FONT)) return false;
+    if (s_loadAttempted) return false;
+    s_loadAttempted = true;
     ensureDrv();
     s_font = lv_font_load("S:" IME_CJK_FONT);
     return s_font != nullptr;

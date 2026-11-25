@@ -500,6 +500,7 @@ void BrowserApp::taCb(lv_event_t *e)
     if (code == LV_EVENT_LONG_PRESSED)
     {
         imeModeCycle();
+        appPageBindTextField(app->ta_);  // reattach after the SD font loads
         app->setStatus(imeMode() == IME_OFF ? TR("Enter a URL") : imeModeStatus());
         return;
     }

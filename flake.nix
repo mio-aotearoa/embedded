@@ -111,6 +111,12 @@
                 firmware/tdeck-plus/browser/js_engine.cpp \
                 "$DUK" -o build/test_browser_js -lm
               ./build/test_browser_js
+              $CXX -std=gnu++17 -O1 -Wall -Wextra \
+                -I firmware/tdeck-plus -I firmware/tdeck-plus/ime \
+                firmware/tdeck-plus/test/host/test_ime_logic.cpp \
+                firmware/tdeck-plus/ime/romaji_kana.cpp \
+                -o build/test_ime_logic
+              ./build/test_ime_logic
               runHook postBuild
             '';
             installPhase = ''
@@ -118,9 +124,10 @@
               cp build/test_zim_archive $out/bin/
               cp build/test_airdrop_companion $out/bin/
               cp build/test_browser_js $out/bin/
+              cp build/test_ime_logic $out/bin/
             '';
             meta = with pkgs.lib; {
-              description = "T-Deck host tests: ZIM parser, browser JS, AirDrop (hermetic)";
+              description = "T-Deck host tests: ZIM, browser JS, AirDrop, IME logic (hermetic)";
               license = licenses.gpl3Plus;
               platforms = platforms.unix;
             };

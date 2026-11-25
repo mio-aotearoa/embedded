@@ -16,7 +16,7 @@ diff --git a/platformio.ini b/platformio.ini
  extra_scripts = pre:scripts/build/pre_gen_baked.py, pre:scripts/inject_wifi_env.py, pre:scripts/build/fatfs_exfat.py, pre:scripts/build/patch_lvgl_anim_uaf.py, pre:scripts/build/patch_lvgl_scroll_uaf.py, pre:scripts/build/patch_lvgl_async_del.py, pre:scripts/build/patch_lvgl_arabic.py, pre:scripts/build/patch_meshcore_txt_timestamp.py, pre:scripts/build/perf_lvgl.py, merge-bin.py
  custom_lvgl_o2 = core, draw, font, misc   ; LVGL's per-frame code at -O2 (scripts/build/perf_lvgl.py); widgets and extra stay -Os
  ; custom_lvgl_iram = lv_draw_sw_blend.c, lv_draw_label.c   ; off on the T-Deck: its ~6 KB of internal RAM is worth more than ~8% of a frame (on-device updates and TLS ran out)
-@@ -686,6 +692,72 @@ build_flags =
+@@ -686,6 +692,78 @@ build_flags =
    -D CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=16384
    -D CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=4096
  
@@ -44,6 +44,12 @@ diff --git a/platformio.ini b/platformio.ini
 +  -I ../../third_party/lvgl_pinyin_ime/src/third_party/libgooglepinyin/include
 +  -I ../../third_party/lvgl_pinyin_ime/src/third_party/libgooglepinyin/port
 +  -D PINYINIME_RUNTIME_ONLY=1
++  ; Upstream's dictionary tables are ~1.3 MB. Its supported P1 port keeps them
++  ; in PSRAM instead of exhausting internal RAM; C++ new/delete call these too.
++  -Wl,--wrap=malloc
++  -Wl,--wrap=free
++  -Wl,--wrap=calloc
++  -Wl,--wrap=realloc
 +
 +  ; --- esp32-ai: SD-backed TinyStories runtime (llm.h) + asset manager ---
 +  -D WADAMESH_ESP32AI=1
@@ -89,12 +95,13 @@ diff --git a/platformio.ini b/platformio.ini
  build_src_filter =
    +<*.cpp>
    +<*.c>
-@@ -696,6 +768,53 @@ build_src_filter =
+@@ -696,6 +774,54 @@ build_src_filter =
    +<ui-touch/*.cpp>
    +<ui-touch/*.c>
    +<../variants/lilygo_tdeck/*.cpp>
 +  +<../../../firmware/tdeck-plus/ime/*.cpp>
 +  +<../../../third_party/lvgl_pinyin_ime/src/core/ime_engine_port.cpp>
++  +<../../../third_party/lvgl_pinyin_ime/src/core/ime_alloc.c>
 +  +<../../../third_party/lvgl_pinyin_ime/src/third_party/libgooglepinyin/src/*.cpp>
 +  -<../../../third_party/lvgl_pinyin_ime/src/third_party/libgooglepinyin/src/dictbuilder.cpp>
 +  -<../../../third_party/lvgl_pinyin_ime/src/third_party/libgooglepinyin/src/utf16reader.cpp>

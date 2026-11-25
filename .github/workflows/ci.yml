@@ -55,6 +55,7 @@ jobs:
           ./result/bin/test_zim_archive
           ./result/bin/test_airdrop_companion
           ./result/bin/test_browser_js
+          ./result/bin/test_ime_logic
 
   wadamesh-tests:
     name: wadamesh host suite (regressions only)
