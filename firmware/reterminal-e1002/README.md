@@ -35,16 +35,21 @@ instructions](https://docs.espressif.com/projects/esp-idf/en/v6.0/esp32s3/get-st
 
 ```bash
 git submodule update --init --recursive
-nix develop   # optional: Node/CMake/Ninja/esptool from the flake
-. "$IDF_PATH/export.sh"
-./firmware/reterminal-e1002/build.sh          # switch + coex + open
-./firmware/reterminal-e1002/build.sh switch
-./firmware/reterminal-e1002/build.sh coex
+export IDF_TOOLS_PATH="$PWD/.toolchains/espressif"
+. ./.toolchains/esp-idf/export.sh
+nix shell nixpkgs#cmake nixpkgs#ninja -c \
+  ./firmware/reterminal-e1002/build.sh         # switch + coex + open
+nix shell nixpkgs#cmake nixpkgs#ninja -c \
+  ./firmware/reterminal-e1002/build.sh switch
+nix shell nixpkgs#cmake nixpkgs#ninja -c \
+  ./firmware/reterminal-e1002/build.sh coex
 ./firmware/reterminal-e1002/build.sh open     # FoA; no IDF required
 ```
 
 The IDF builder applies the three photoframe patches and ESP32Drop's, then
-generates web/splash assets.
+generates web/splash assets. Use the minimal Nix shell rather than
+`nix develop`: the devShell's Python packages can shadow the project-local
+ESP-IDF virtualenv.
 
 ### Project-local toolchain
 

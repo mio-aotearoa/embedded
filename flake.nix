@@ -20,7 +20,7 @@
     # Pinned exactly like third_party/zstd (git submodule); the parser's host
     # test links the real decompressor, not a stub.
     zstd = {
-      url = "github:facebook/zstd/f8745da6ff1ad1e7bab384bd1f9d742439278e99";
+      url = "github:facebook/zstd/916e8e70b33317d469a41ee837e47317807815c8";
       flake = false;
     };
     # Duktape's git repo ships raw sources only, and the amalgamation is what the

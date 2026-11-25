@@ -13,7 +13,7 @@ tree.
 git clone --recurse-submodules <this-repo> && cd <this-repo>
 ./scripts/patches.sh apply
 ./scripts/patches.sh status
-./scripts/patches.sh rebase wadamesh tak-beta_106.16  # the pinned tag; bump the pin after
+./scripts/patches.sh rebase wadamesh tak-beta_106.22  # the pinned tag; bump the pin after
 ```
 
 Details: [`docs/architecture.md`](docs/architecture.md),
@@ -46,7 +46,10 @@ Images land in `third_party/out/`. Hermetic host tests: `nix build` →
 ## reTerminal E1002
 
 ```bash
-nix develop -c bash -lc '. "$IDF_PATH/export.sh" && firmware/reterminal-e1002/build.sh'
+export IDF_TOOLS_PATH="$PWD/.toolchains/espressif"
+. .toolchains/esp-idf/export.sh
+nix shell nixpkgs#cmake nixpkgs#ninja -c \
+  ./firmware/reterminal-e1002/build.sh switch
 ```
 
 See [`firmware/reterminal-e1002/README.md`](firmware/reterminal-e1002/README.md).
