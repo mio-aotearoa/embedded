@@ -1,12 +1,13 @@
 diff --git a/platformio.ini b/platformio.ini
+index 387e3b07..7db1b8d8 100644
 --- a/platformio.ini
 +++ b/platformio.ini
 @@ -544,7 +544,13 @@ platform = platformio/espressif32@6.11.0
  framework = arduino
  board = t-deck
  monitor_speed = 115200
--board_build.partitions = variants/lilygo_tdeck/partitions_tdeck_touch_big_app.csv   ; 4.5 MB app slots (Flock You, then beta_103); one USB install to adopt
-+; USB-only updates: one 7.75 MB app slot instead of the fork's two 4.5 MB OTA
+-board_build.partitions = variants/lilygo_tdeck/partitions_tdeck_touch_big_app.csv   ; 4.625 MB app slots (Flock You, beta_103, then beta_108); one USB install to adopt
++; USB-only updates: one 7.75 MB app slot instead of the fork's two 4.625 MB OTA
 +; slots. Tiles and spiffs keep the offsets this repository has always used
 +; (partitions_tdeck_touch.csv), so re-flashing one of our devices keeps the map
 +; tile cache and every stored preference. A card moved here from a stock -tak
@@ -151,9 +152,10 @@ diff --git a/platformio.ini b/platformio.ini
  lib_deps =
    https://github.com/ALLFATHER-BV/meshcomod.git#core-v1.18.0
 diff --git a/src/ui-touch/device_caps.h b/src/ui-touch/device_caps.h
+index 7cf5b315..ac34d2ae 100644
 --- a/src/ui-touch/device_caps.h
 +++ b/src/ui-touch/device_caps.h
-@@ -183,7 +183,13 @@
+@@ -184,7 +184,13 @@
    #define CAP_SD           1
    #define CAP_FILESYSTEM   1
    #define CAP_GPS          1   // CC1167Q on UART
@@ -167,4 +169,3 @@ diff --git a/src/ui-touch/device_caps.h b/src/ui-touch/device_caps.h
    #define CAP_LOCK_SCREEN  1
  
  #elif defined(HAS_RAK_TAP_V2)         // ===== RAK WisMesh Tap V2 (ESP32-S3) =====
-

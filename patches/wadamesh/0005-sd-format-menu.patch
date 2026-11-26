@@ -1,7 +1,8 @@
 diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
+index 95ba222a..e8b5a1f6 100644
 --- a/src/ui-touch/UITask.cpp
 +++ b/src/ui-touch/UITask.cpp
-@@ -29968,7 +30013,19 @@ static const char* sdRemovedAlertText() {
+@@ -30828,7 +30828,19 @@ static const char* sdRemovedAlertText() {
                            : TR("SD card removed");
  }
  #endif
@@ -22,7 +23,7 @@ diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
  static lv_obj_t* s_fm_fmt_overlay = nullptr; // full-screen "formatting..." notice
  static lv_obj_t* s_fm_actions    = nullptr;  // per-entry action sheet
  static lv_obj_t* s_fm_prompt     = nullptr;  // text-input modal (rename / new folder)
-@@ -31873,12 +31930,73 @@ static void fmSdDoFormat() {
+@@ -32751,12 +32763,73 @@ static void fmSdDoFormat() {
        g_lv.task->showAlert(TR("SD is busy - close tools and retry"), 2600);
      return;
    }
@@ -100,7 +101,7 @@ diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
  // Tap on an unmounted SD row: try to mount, and if the card is unreadable
  // (no FAT16/FAT32/exFAT volume, or a corrupt one) offer to format.
  static void fmSdMountOrFormatCb(lv_event_t* e) {
-@@ -31886,7 +32004,7 @@ static void fmSdMountOrFormatCb(lv_event_t* e) {
+@@ -32764,7 +32837,7 @@ static void fmSdMountOrFormatCb(lv_event_t* e) {
    s_sd_retry_after_ms = 0;   // explicit user retry — bypass the mount backoff
    if (fmSdTryMount()) { fmShowRoots(); return; }
    s_confirm_owner_next = true;
@@ -109,7 +110,7 @@ diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
  }
  
  // Seed the core folder layout on a freshly-formatted MESHCOMOD card. These back
-@@ -31977,7 +32095,7 @@ static void sdWriteFatLabel(uint8_t pdrv, const char* label) {
+@@ -32855,7 +32928,7 @@ static void sdWriteFatLabel(uint8_t pdrv, const char* label) {
  static void fmSdLongPressFormatCb(lv_event_t* e) {
    if (lv_event_get_code(e) != LV_EVENT_LONG_PRESSED) return;
    s_confirm_owner_next = true;
@@ -118,7 +119,7 @@ diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
  }
  
  #endif  // HAS_TDECK_GT911 || HAS_THINKNODE_M9 (microSD mount/format helpers)
-@@ -94693,8 +95057,8 @@ void UITask::loop() {
+@@ -97920,8 +97993,8 @@ void UITask::loop() {
            char drv[3] = { (char)('0' + pdrv), ':', 0 };
            void* work = malloc(4096);                       // f_mkfs scratch (>= FF_MAX_SS)
            if (work) {

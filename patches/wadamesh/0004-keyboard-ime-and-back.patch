@@ -1,7 +1,8 @@
 diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
+index 578ebd2a..95ba222a 100644
 --- a/src/ui-touch/UITask.cpp
 +++ b/src/ui-touch/UITask.cpp
-@@ -61854,6 +62040,41 @@ static unsigned long s_hw_last_space_ms = 0;
+@@ -63890,6 +63890,41 @@ static unsigned long s_hw_last_space_ms = 0;
  // Route a physical-keyboard character into the textarea currently being edited
  // — the on-screen keyboard's target, which is the chat composer directly or the
  // settings mirror textarea. No field open -> the key is ignored.
@@ -43,7 +44,7 @@ diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
  static void handleHwKey(int key) {
    if (key != ' ') s_hw_last_space_ms = 0;
    if (!g_lv.keyboard) return;
-@@ -62048,6 +62260,32 @@ if (g_lv.task && g_lv.task->isManualLock()) {
+@@ -64084,6 +64119,32 @@ if (g_lv.task && g_lv.task->isManualLock()) {
      if (g_lv.keyboard) lv_keyboard_set_textarea(g_lv.keyboard, nullptr);
      ta_focused = nullptr;
    }
@@ -76,7 +77,7 @@ diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
  #if CAP_KEYPAD_NAV && !defined(TLORA_PAGER)
    // Edit mode (keyboard-nav ON only): a focused field becomes the typing target after
    // select/Enter (below) — until then `ta` is null so the nav keys navigate. With
-@@ -62388,6 +62626,11 @@ if (g_lv.task && g_lv.task->isManualLock()) {
+@@ -64438,6 +64499,11 @@ if (g_lv.task && g_lv.task->isManualLock()) {
      }
      accentBoxHide();
    } else if (key == ' ') {
@@ -88,7 +89,7 @@ diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
      // Double-tap SPACE within kDoubleSpaceMs toggles between English and
      // the configured secondary keyboard. If no secondary is set, it behaves
      // as a normal space. The limit is 250 ms, except on the M9: its same-key
-@@ -62416,6 +62659,10 @@ if (g_lv.task && g_lv.task->isManualLock()) {
+@@ -64466,6 +64532,10 @@ if (g_lv.task && g_lv.task->isManualLock()) {
        lv_textarea_add_char(ta, ' ');
      }
    } else if (key == 0x0D) {                   // regular ENTER (CR)
@@ -99,7 +100,7 @@ diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
      // Enter is a non-typing action (send / newline / submit) — always tear down the
      // accent + @-mention popups. The Enter-to-send path keeps the keyboard up "for the
      // next message", so without this the accent box for the last letter lingers over
-@@ -62499,6 +62746,11 @@ if (g_lv.task && g_lv.task->isManualLock()) {
+@@ -64550,6 +64620,11 @@ if (g_lv.task && g_lv.task->isManualLock()) {
      composerMentionRefresh(ta);
  #endif
    } else if (key >= 0x20 && key < 0x7F) {      // printable ASCII
@@ -111,7 +112,7 @@ diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
      bool shifted = (key >= 'A' && key <= 'Z');
      const char* mapped = keyboardLayoutMapHwKey(keyboardLayoutsGetCurrent(), key, shifted);
      if (mapped) {
-@@ -68237,29 +68563,59 @@ static void statusBarTapCb(lv_event_t* e) {
+@@ -70590,29 +70665,59 @@ static void statusBarTapCb(lv_event_t* e) {
    if (s_cc_root) closeControlCenter(); else openControlCenter();
  }
  
@@ -190,7 +191,7 @@ diff --git a/src/ui-touch/UITask.cpp b/src/ui-touch/UITask.cpp
      lv_area_t ba;
      lv_obj_get_coords(g_statusbar.root, &ba);
      if (pt.y < ba.y1 + STATUSBAR_H) return;   // the top row keeps the bar's usual tap
-@@ -68627,7 +68983,12 @@ static void buildGlobalStatusBar() {
+@@ -70982,7 +71087,12 @@ static void buildGlobalStatusBar() {
    // keypad users open the control center via the dedicated key.)
    lv_obj_add_flag(g_statusbar.root, NAV_SKIP_FLAG);
    lv_obj_add_event_cb(g_statusbar.root, statusBarTapCb, LV_EVENT_CLICKED, nullptr);

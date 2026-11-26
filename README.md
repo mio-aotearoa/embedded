@@ -13,7 +13,7 @@ tree.
 git clone --recurse-submodules <this-repo> && cd <this-repo>
 ./scripts/patches.sh apply
 ./scripts/patches.sh status
-./scripts/patches.sh rebase wadamesh tak-beta_106.22  # the pinned tag; bump the pin after
+./scripts/patches.sh rebase wadamesh tak-beta_108.3  # the pinned tag; bump the pin after
 ```
 
 Details: [`docs/architecture.md`](docs/architecture.md),
